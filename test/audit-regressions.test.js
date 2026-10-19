@@ -156,7 +156,9 @@ test('F3: the scenario itself still includes the assumptions (exploration is kep
 // ---- found in the audit's own probe: net turns negative again above break-even ----
 test('non-monotonic: if net drops below zero at a higher headcount, the result is not "supported"', () => {
   const o = base({ capacity: 8, price: 100, groupSize: 4, groupPrice: 100, groupShare: 1, venueQuote: { flatFee: 200 }, scenarioParticipants: { conservative: 3 } });
-  const s = recordTerms(stateFor(o, { evidence: { surveyResponses: 8, paidRegistrations: { golf: 4 }, namedHighIntent: { golf: 0 } } }), o);
+  // Updated 2026-10-19 (ChatGPT review F1): with 4 already paid, headcounts below 4 are impossible and are no longer scanned,
+  // so the dip is now set up with named answers instead of paid ones. Same rule under test: a dip above break-even blocks "supported".
+  const s = recordTerms(stateFor(o, { evidence: { surveyResponses: 8, paidRegistrations: { golf: 0 }, namedHighIntent: { golf: 4 } } }), o);
   const d = E.decide(s, o);
   assert.equal(d.breakEven.nonMonotonic, true);
   assert.notEqual(d.status, 'supported_by_current_evidence');

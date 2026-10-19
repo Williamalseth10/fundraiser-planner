@@ -151,8 +151,14 @@
     const norm = normalizeParticipants(option, requestedParticipants);
     const n = norm.participants;
 
-    const reg = registrationCents(option, n);
-    const registration = reg.total;
+    // Tickets already paid for bring in what was actually received, whatever today's price is.
+    // Only sales beyond them use the current offer. If the amount received isn't entered, paid tickets are
+    // valued at the current offer and decide() flags it (see the "amount actually received" open item).
+    const paidSoFar = int(ctx.paidRegistrations);
+    const paidCashKnown = paidSoFar > 0 && ctx.paidRegistrationCash != null && ctx.paidRegistrationCash !== '';
+    const reg = paidCashKnown ? registrationCents(option, Math.max(0, n - paidSoFar)) : registrationCents(option, n);
+    const registration = (paidCashKnown ? c(nonNeg(ctx.paidRegistrationCash)) : 0) + reg.total;
+    if (paidCashKnown && n < paidSoFar) norm.flags.push('fewer_than_already_paid');
     const extras = c(ctx.extraRevenuePerParticipant) * n;
     const other = c(ctx.otherRevenue);
     const sp = sponsorshipCashCents(option, ctx.sponsorships, statuses);
@@ -206,8 +212,11 @@
    * Smallest feasible participant count whose net >= target, found by checking every feasible count
    * (not a single formula, because minimums and group sizes make costs nonlinear).
    */
+  // Headcounts below the number already paid for can't happen, so break-even and the chart start there.
+  const possibleCounts = (option, ctx) => { const paid = int(ctx.paidRegistrations); return feasibleCounts(option).filter((n, i, all) => n >= paid || (i === all.length - 1)); };
+
   function participantsNeeded(option, target, ctx = {}) {
-    const counts = feasibleCounts(option);
+    const counts = possibleCounts(option, ctx);
     const goal = c(target);
     let found = null;
     let dipsAfter = false;
@@ -229,7 +238,7 @@
 
   /** Net at every feasible count — for charts and for showing what a shortfall does. */
   function netCurve(option, ctx = {}) {
-    return feasibleCounts(option).map((n) => ({ participants: n, net: project(option, n, ctx).net }));
+    return possibleCounts(option, ctx).map((n) => ({ participants: n, net: project(option, n, ctx).net }));
   }
 
   /**
@@ -302,10 +311,10 @@
       price: c(option.price),
       groupSize: size,
       groupPrice: size > 1 ? (gpRaw == null || gpRaw === '' ? c(option.price) * size : c(gpRaw)) : null,
-      format: txt(sn.format), date: txt(sn.dateWindow), place: txt(sn.locationArea), included: txt(sn.included),
+      format: txt(sn.format), date: txt(sn.dateWindow), place: txt(sn.locationArea), included: txt(sn.included), supports: txt(sn.beneficiary),
     };
   }
-  const TERM_LABELS = { kind: 'kind of event', price: 'price', groupSize: 'group size', groupPrice: 'group price', format: 'event description', date: 'date', place: 'location', included: 'what the price includes' };
+  const TERM_LABELS = { kind: 'kind of event', price: 'price', groupSize: 'group size', groupPrice: 'group price', format: 'event description', date: 'date', place: 'location', included: 'what the price includes', supports: 'what the money supports' };
 
   /**
    * Are this option's survey answers about the offer as it stands now?
@@ -321,8 +330,18 @@
     const rec = (ev.offerTerms || {})[option.id];
     if (!rec) return { state: 'unrecorded', changed: [] };
     const now = offerTerms(option, state.snapshot);
-    const changed = Object.keys(TERM_LABELS).filter((k) => String(rec[k] ?? '') !== String(now[k] ?? '')).map((k) => TERM_LABELS[k]);
+    // Terms recorded by an older version may lack newer keys (e.g. "supports"); those keys are not compared.
+    const changed = Object.keys(TERM_LABELS).filter((k) => k in rec && String(rec[k] ?? '') !== String(now[k] ?? '')).map((k) => TERM_LABELS[k]);
     return { state: changed.length ? 'stale' : 'current', changed, recorded: rec, now };
+  }
+
+  /**
+   * The single FIRM-MONEY basis used everywhere a "firm" number is shown (break-even, target, chart, cash card):
+   * the conservative scenario's costs (incl. its contingency), ticket money, and only collected/committed sponsorship
+   * and in-kind. No add-ons, other income or auction/raffle estimates.
+   */
+  function firmContext(state, option) {
+    return { ...scenarioContext(state, option, 'conservative'), statuses: ['collected', 'committed'], extraRevenuePerParticipant: 0, otherRevenue: 0 };
   }
 
   /** Build the scenario context for an option from app state. */
@@ -352,7 +371,8 @@
     const proceedsLow = Number(((option.scenarioProceeds || {}).conservative)) || 0;
     // FIRM break-even: ticket/registration money plus collected or committed sponsorship. Nothing assumed:
     // no per-person add-ons, no "other income", no auction or raffle estimates.
-    const firmCtx = { ...consCtx, statuses: ['collected', 'committed'], extraRevenuePerParticipant: 0, otherRevenue: 0 };
+    const firmCtx = firmContext(state, option);
+    const firm = project(option, (option.scenarioParticipants || {}).conservative, firmCtx);
     const be = participantsNeeded(option, 0, firmCtx);
     const tg = participantsNeeded(option, target, firmCtx);
     // CONDITIONAL break-even: the same, plus the organizer's own low-case assumptions. Reported, never relied on.
@@ -379,6 +399,7 @@
     if (evidence.state === 'unrecorded') missing.push('Survey answers are entered, but not which price and terms they were for. Confirm them on the "What did supporters say?" step.');
     if (paid === 0) missing.push('No paid sign-ups, tickets or orders yet.');
     if (paid > 0 && consCtx.paidRegistrationCash == null) missing.push('People have paid, but the amount actually received is not entered, so it is left out of cash in hand.');
+    if (firm.upfront.gap > 0 && !option.upfrontFundingConfirmed) missing.push(`You'd need $${firm.upfront.gap.toLocaleString('en-US')} more cash before the event than you have now (deposit and bills due in advance). Confirm how the club will cover it.`);
     if (option.cancellationOwed == null || option.cancellationOwed === '') missing.push('What you would owe if you cancel after the deadline on the quote has not been entered.');
     if (state.volunteerHoursAvailable == null || state.volunteerHoursAvailable === '') missing.push('Volunteer hours actually available are unknown.');
     else if (nonNeg(option.volunteerHours) > nonNeg(state.volunteerHoursAvailable)) missing.push(`Estimated volunteer need (${nonNeg(option.volunteerHours)} h) exceeds hours available (${nonNeg(state.volunteerHoursAvailable)} h).`);
@@ -413,7 +434,7 @@
     if (target > 0 && !tg.reachableWithinCapacity) reasons.push(`The $${target.toLocaleString('en-US')} target is not reachable even at full capacity with only collected/committed sponsorship (max ≈ $${Math.round(tg.netAtCapacity).toLocaleString('en-US')}).`);
 
     return {
-      status, reasons, missing, breakEven: be, targetNeeded: tg, conservative: cons, paid, named, namedCounted, definitely, responses, evidence,
+      status, reasons, missing, breakEven: be, targetNeeded: tg, conservative: cons, firm, paid, named, namedCounted, definitely, responses, evidence,
       worst: worstCase(option, state.sponsorships), cancel: cancellationExposure(option, state.sponsorships), proceedsLow, conditional,
       beWithLowProceeds: conditional, // kept for older callers
     };
@@ -431,7 +452,7 @@
     SPONSOR_STATUSES, STATUS_LABELS,
     participantStep, maxFeasible, feasibleCounts, normalizeParticipants,
     registrationCents, worstCase, cancellationExposure, roundHeadline,
-    project, participantsNeeded, netCurve, sensitivity, scenarioContext, decide, offerTerms, evidenceStatus,
+    project, participantsNeeded, netCurve, sensitivity, scenarioContext, firmContext, decide, offerTerms, evidenceStatus,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -25,6 +25,7 @@ Open `index.html` in any browser. It runs entirely in the browser, with no accou
 node --test test/*.test.js     # must pass
 node scripts/build.js          # regenerates index.html
 python3 test/ui_smoke.py       # optional browser check (needs Playwright)
+python3 test/ui_review.py      # optional browser checks for security, import safety and keyboard access
 ```
 Every push and pull request runs the engine tests and the build automatically (see `.github/workflows/ci.yml`).
 

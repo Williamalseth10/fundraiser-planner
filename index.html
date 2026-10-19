@@ -101,6 +101,10 @@ td .chk { margin-right: 10px; }
 .callout.ok { border-style: solid; border-color: var(--ok); background: var(--ok-bg); }
 .callout.warn-callout { border-style: solid; border-color: var(--warn); background: var(--warn-bg); }
 .callout + .callout { margin-top: 10px; }
+/* File inputs stay keyboard-focusable (Tab reaches them) but are drawn as the button-style label around them. */
+.file-input { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+label.small:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+label.small { position: relative; }
 .row-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
 
 /* home */
@@ -240,7 +244,7 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
       <p class="hint">Your plan saves automatically in this browser. To keep a copy, move it to another computer, or share it with your board, export it and save the text in a file.</p>
       <div class="row-actions">
         <button class="small" data-action="export">Export plan</button>
-        <label class="small">Import a plan file<input type="file" accept=".json,application/json" data-action="import-json" hidden></label>
+        <label class="small">Import a plan file<input type="file" class="file-input" accept=".json,application/json" data-action="import-json"></label>
         <button class="small" data-action="load-demo">Load the golf example</button>
         <button class="small danger" data-action="start-blank">Start over</button>
       </div>
@@ -410,8 +414,14 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
     const norm = normalizeParticipants(option, requestedParticipants);
     const n = norm.participants;
 
-    const reg = registrationCents(option, n);
-    const registration = reg.total;
+    // Tickets already paid for bring in what was actually received, whatever today's price is.
+    // Only sales beyond them use the current offer. If the amount received isn't entered, paid tickets are
+    // valued at the current offer and decide() flags it (see the "amount actually received" open item).
+    const paidSoFar = int(ctx.paidRegistrations);
+    const paidCashKnown = paidSoFar > 0 && ctx.paidRegistrationCash != null && ctx.paidRegistrationCash !== '';
+    const reg = paidCashKnown ? registrationCents(option, Math.max(0, n - paidSoFar)) : registrationCents(option, n);
+    const registration = (paidCashKnown ? c(nonNeg(ctx.paidRegistrationCash)) : 0) + reg.total;
+    if (paidCashKnown && n < paidSoFar) norm.flags.push('fewer_than_already_paid');
     const extras = c(ctx.extraRevenuePerParticipant) * n;
     const other = c(ctx.otherRevenue);
     const sp = sponsorshipCashCents(option, ctx.sponsorships, statuses);
@@ -465,8 +475,11 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
    * Smallest feasible participant count whose net >= target, found by checking every feasible count
    * (not a single formula, because minimums and group sizes make costs nonlinear).
    */
+  // Headcounts below the number already paid for can't happen, so break-even and the chart start there.
+  const possibleCounts = (option, ctx) => { const paid = int(ctx.paidRegistrations); return feasibleCounts(option).filter((n, i, all) => n >= paid || (i === all.length - 1)); };
+
   function participantsNeeded(option, target, ctx = {}) {
-    const counts = feasibleCounts(option);
+    const counts = possibleCounts(option, ctx);
     const goal = c(target);
     let found = null;
     let dipsAfter = false;
@@ -488,7 +501,7 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
 
   /** Net at every feasible count — for charts and for showing what a shortfall does. */
   function netCurve(option, ctx = {}) {
-    return feasibleCounts(option).map((n) => ({ participants: n, net: project(option, n, ctx).net }));
+    return possibleCounts(option, ctx).map((n) => ({ participants: n, net: project(option, n, ctx).net }));
   }
 
   /**
@@ -561,10 +574,10 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
       price: c(option.price),
       groupSize: size,
       groupPrice: size > 1 ? (gpRaw == null || gpRaw === '' ? c(option.price) * size : c(gpRaw)) : null,
-      format: txt(sn.format), date: txt(sn.dateWindow), place: txt(sn.locationArea), included: txt(sn.included),
+      format: txt(sn.format), date: txt(sn.dateWindow), place: txt(sn.locationArea), included: txt(sn.included), supports: txt(sn.beneficiary),
     };
   }
-  const TERM_LABELS = { kind: 'kind of event', price: 'price', groupSize: 'group size', groupPrice: 'group price', format: 'event description', date: 'date', place: 'location', included: 'what the price includes' };
+  const TERM_LABELS = { kind: 'kind of event', price: 'price', groupSize: 'group size', groupPrice: 'group price', format: 'event description', date: 'date', place: 'location', included: 'what the price includes', supports: 'what the money supports' };
 
   /**
    * Are this option's survey answers about the offer as it stands now?
@@ -580,8 +593,18 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
     const rec = (ev.offerTerms || {})[option.id];
     if (!rec) return { state: 'unrecorded', changed: [] };
     const now = offerTerms(option, state.snapshot);
-    const changed = Object.keys(TERM_LABELS).filter((k) => String(rec[k] ?? '') !== String(now[k] ?? '')).map((k) => TERM_LABELS[k]);
+    // Terms recorded by an older version may lack newer keys (e.g. "supports"); those keys are not compared.
+    const changed = Object.keys(TERM_LABELS).filter((k) => k in rec && String(rec[k] ?? '') !== String(now[k] ?? '')).map((k) => TERM_LABELS[k]);
     return { state: changed.length ? 'stale' : 'current', changed, recorded: rec, now };
+  }
+
+  /**
+   * The single FIRM-MONEY basis used everywhere a "firm" number is shown (break-even, target, chart, cash card):
+   * the conservative scenario's costs (incl. its contingency), ticket money, and only collected/committed sponsorship
+   * and in-kind. No add-ons, other income or auction/raffle estimates.
+   */
+  function firmContext(state, option) {
+    return { ...scenarioContext(state, option, 'conservative'), statuses: ['collected', 'committed'], extraRevenuePerParticipant: 0, otherRevenue: 0 };
   }
 
   /** Build the scenario context for an option from app state. */
@@ -611,7 +634,8 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
     const proceedsLow = Number(((option.scenarioProceeds || {}).conservative)) || 0;
     // FIRM break-even: ticket/registration money plus collected or committed sponsorship. Nothing assumed:
     // no per-person add-ons, no "other income", no auction or raffle estimates.
-    const firmCtx = { ...consCtx, statuses: ['collected', 'committed'], extraRevenuePerParticipant: 0, otherRevenue: 0 };
+    const firmCtx = firmContext(state, option);
+    const firm = project(option, (option.scenarioParticipants || {}).conservative, firmCtx);
     const be = participantsNeeded(option, 0, firmCtx);
     const tg = participantsNeeded(option, target, firmCtx);
     // CONDITIONAL break-even: the same, plus the organizer's own low-case assumptions. Reported, never relied on.
@@ -638,6 +662,7 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
     if (evidence.state === 'unrecorded') missing.push('Survey answers are entered, but not which price and terms they were for. Confirm them on the "What did supporters say?" step.');
     if (paid === 0) missing.push('No paid sign-ups, tickets or orders yet.');
     if (paid > 0 && consCtx.paidRegistrationCash == null) missing.push('People have paid, but the amount actually received is not entered, so it is left out of cash in hand.');
+    if (firm.upfront.gap > 0 && !option.upfrontFundingConfirmed) missing.push(`You'd need $${firm.upfront.gap.toLocaleString('en-US')} more cash before the event than you have now (deposit and bills due in advance). Confirm how the club will cover it.`);
     if (option.cancellationOwed == null || option.cancellationOwed === '') missing.push('What you would owe if you cancel after the deadline on the quote has not been entered.');
     if (state.volunteerHoursAvailable == null || state.volunteerHoursAvailable === '') missing.push('Volunteer hours actually available are unknown.');
     else if (nonNeg(option.volunteerHours) > nonNeg(state.volunteerHoursAvailable)) missing.push(`Estimated volunteer need (${nonNeg(option.volunteerHours)} h) exceeds hours available (${nonNeg(state.volunteerHoursAvailable)} h).`);
@@ -672,7 +697,7 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
     if (target > 0 && !tg.reachableWithinCapacity) reasons.push(`The $${target.toLocaleString('en-US')} target is not reachable even at full capacity with only collected/committed sponsorship (max ≈ $${Math.round(tg.netAtCapacity).toLocaleString('en-US')}).`);
 
     return {
-      status, reasons, missing, breakEven: be, targetNeeded: tg, conservative: cons, paid, named, namedCounted, definitely, responses, evidence,
+      status, reasons, missing, breakEven: be, targetNeeded: tg, conservative: cons, firm, paid, named, namedCounted, definitely, responses, evidence,
       worst: worstCase(option, state.sponsorships), cancel: cancellationExposure(option, state.sponsorships), proceedsLow, conditional,
       beWithLowProceeds: conditional, // kept for older callers
     };
@@ -690,7 +715,7 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
     SPONSOR_STATUSES, STATUS_LABELS,
     participantStep, maxFeasible, feasibleCounts, normalizeParticipants,
     registrationCents, worstCase, cancellationExposure, roundHeadline,
-    project, participantsNeeded, netCurve, sensitivity, scenarioContext, decide, offerTerms, evidenceStatus,
+    project, participantsNeeded, netCurve, sensitivity, scenarioContext, firmContext, decide, offerTerms, evidenceStatus,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
@@ -864,7 +889,16 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
   const SAVE_KEY = 'bfp-plan-v1';
   let state = clone(window.BFDemo.DEMO_STATE);
   let touched = false; // only save once the person has actually started a plan
-  try { const saved = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); if (saved && Array.isArray(saved.options) && saved.scenarioSettings) { state = saved; touched = true; } } catch (e) { /* storage unavailable: start from demo */ }
+  let startupNote = '';
+  // Use the saved plan only if it passes the same checks as an import; otherwise try the backup, then fall back to the example.
+  try {
+    for (const key of [SAVE_KEY, SAVE_KEY + '-backup']) {
+      const raw = localStorage.getItem(key); if (!raw) continue;
+      const saved = JSON.parse(raw);
+      if (!validatePlan(saved).length) { state = saved; touched = true; if (key !== SAVE_KEY) startupNote = 'Your saved plan could not be read, so your backup copy was loaded.'; break; }
+      startupNote = 'Your saved plan could not be read safely, so it was not loaded.';
+    }
+  } catch (e) { /* storage unavailable: start from the example */ }
   function migrate(st) {
     st.evidence = st.evidence || {};
     st.evidence.paidCashReceived = st.evidence.paidCashReceived || {};
@@ -1014,13 +1048,11 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
   ];
 
   function anchors(o) {
-    const ev = state.evidence;
-    const paid = (ev.paidRegistrations || {})[o.id] || 0;
-    const named = (ev.namedHighIntent || {})[o.id] || 0;
-    const def = (ev.surveyDefinitelyAtPrice || {})[o.id] || 0;
-    const prob = (ev.surveyProbablyAtPrice || {})[o.id] || 0;
+    const ev = state.evidence, n = (m) => Math.max(0, Math.floor(Number((ev[m] || {})[o.id]) || 0));
+    const paid = n('paidRegistrations'), def = n('surveyDefinitelyAtPrice'), prob = n('surveyProbablyAtPrice');
+    const d = E.decide(state, o), named = d.namedCounted, raw = n('namedHighIntent');
     return `<p class="anchors"><b>Your evidence so far</b> (running totals, not forecasts):
-      paid <b>${paid}</b> · plus named “yes” <b>${paid + named}</b> · plus anonymous “yes” <b>${paid + named + def}</b> · plus “maybe” <b>${paid + named + def + prob}</b> · capacity <b>${E.maxFeasible(o)}</b></p>`;
+      paid <b>${paid}</b> · plus named “yes” for the current offer <b>${paid + named}</b> · plus anonymous “yes” <b>${paid + named + def}</b> · plus “maybe” <b>${paid + named + def + prob}</b> · capacity <b>${E.maxFeasible(o)}</b>${raw > named ? `<br><span class="flag">${raw - named} named “yes” answers aren't counted: they were for a different or unrecorded offer</span>` : ''}</p>`;
   }
 
   // ---------- per-option step bodies (wizard) ----------
@@ -1064,6 +1096,7 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
       <h3 class="sub">${product ? 'Deposit to the supplier' : 'Deposit'}</h3>
       <div class="fields">${num(p + '.deposit.amount', product ? 'Deposit paid before ordering ($, 0 if none)' : 'Deposit amount ($)')}</div>
       <div class="checks">${chk(p + '.deposit.creditedTowardBill', 'The deposit counts toward the final bill')}${chk(p + '.deposit.refundable', 'The deposit is refundable')}</div>
+      <div class="callout ${o.upfrontFundingConfirmed ? 'ok' : ''}">${chk(p + '.upfrontFundingConfirmed', 'The treasurer confirmed the club can cover money due before the event, even if sign-ups come in slowly')}<span>If cash needed up front is more than cash in hand, this stays on the “must verify” list until checked.</span></div>
       <h3 class="sub">Cancellation</h3>
       <div class="fields">${num(p + '.cancellationOwed', product ? 'Total you would owe the supplier if you cancel after ordering, including any deposit you would lose ($, 0 if you can cancel for free, blank = not known yet)' : 'Total you would owe if you cancel after the deadline on the quote, including any deposit you would lose ($, blank = not known yet)', { placeholder: 'not known yet', wide: true })}</div>
       <div class="callout ${o.quoteVerified ? 'ok' : ''}">${chk(p + '.quoteVerified', 'I have this quote in writing')}<span>Until this is checked, the result will say “Not enough evidence to decide yet.”</span></div>
@@ -1284,11 +1317,11 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   }
   function cashField(o) {
     const v = (state.evidence.paidCashReceived || {})[o.id];
-    return `<input type="number" inputmode="decimal" min="0" step="any" data-path="evidence.paidCashReceived.${o.id}" data-type="number" value="${v == null ? '' : esc(v)}" placeholder="not entered" aria-label="${esc(o.name)}: money actually received in dollars">`;
+    return `<input type="number" inputmode="decimal" min="0" step="any" data-path="evidence.paidCashReceived.${esc(o.id)}" data-type="number" value="${v == null ? '' : esc(v)}" placeholder="not entered" aria-label="${esc(o.name)}: money actually received in dollars">`;
   }
 
   function stepEvidence() {
-    const field = (key, o) => `<input type="number" inputmode="numeric" min="0" step="1" data-path="evidence.${key}.${o.id}" data-type="number" value="${esc((state.evidence[key] || {})[o.id] || 0)}" aria-label="${esc(o.name)}: ${key}">`;
+    const field = (key, o) => `<input type="number" inputmode="numeric" min="0" step="1" data-path="evidence.${key}.${esc(o.id)}" data-type="number" value="${esc((state.evidence[key] || {})[o.id] || 0)}" aria-label="${esc(o.name)}: ${key}">`;
     return `<div class="fields">${num('evidence.surveyResponses', 'How many people answered the survey?', { step: 1 })}</div>
       <div class="table-wrap"><table class="edit">
         <thead><tr><th>Option</th><th>Already paid (${'people or items'})</th><th>Money actually received ($)<br><span class="muted">from your records</span></th><th>Said “Yes” and left their name</th><th>Said “Yes” anonymously</th><th>Said “Maybe”</th></tr></thead>
@@ -1303,7 +1336,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <li>For money received, enter what actually came in, from your records. The planner never works it out from price × people, because group deals and price changes make that wrong.</li>
       </ul>
       <details class="qs"><summary>Import counts from a spreadsheet (CSV)</summary>
-        <div class="row-actions"><label class="small filebtn">Choose CSV file<input type="file" accept=".csv,text/csv" data-action="import-csv" hidden></label>
+        <div class="row-actions"><label class="small filebtn">Choose CSV file<input type="file" class="file-input" accept=".csv,text/csv" data-action="import-csv"></label>
         <button class="small" data-action="csv-template">Show CSV template</button></div>
       </details>`;
   }
@@ -1343,8 +1376,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   function analyse(o) {
     const proj = {};
     SC.forEach((k) => { proj[k] = E.project(o, (o.scenarioParticipants || {})[k], E.scenarioContext(state, o, k)); });
-    const midCtx = E.scenarioContext(state, o, 'middle');
-    const firmCtx = { ...midCtx, statuses: ['collected', 'committed'], extraRevenuePerParticipant: 0, otherRevenue: 0 };
+    const firmCtx = E.firmContext(state, o); // same basis as the firm break-even
     const dec = E.decide(state, o);
     return { proj, dec, curve: E.netCurve(o, firmCtx), sens: E.sensitivity(o, (o.scenarioParticipants || {}).middle, E.scenarioContext(state, o, 'middle')) };
   }
@@ -1369,8 +1401,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     const row = (label, f, cls = '') => `<tr class="${cls}"><th>${label}</th>${SC.map((k) => `<td>${f(P[k], k)}</td>`).join('')}</tr>`;
     const flags = (p) => p.flags.length ? ` <span class="flag">${p.flags.map((f) => f.replace(/_/g, ' ')).join(', ')}</span>` : '';
     const ss = state.scenarioSettings;
-    const midCtx = E.scenarioContext(state, o, 'middle');
-    const firmMarkCtx = { ...midCtx, statuses: ['collected', 'committed'], extraRevenuePerParticipant: 0, otherRevenue: 0 };
+    const firmMarkCtx = E.firmContext(state, o);
     const marks = SC.map((k) => ({ n: P[k].participants, label: ss[k].label, net: E.project(o, P[k].participants, firmMarkCtx).net }));
     const ik = [...new Map(SC.flatMap((k) => P[k].inKind.applied.concat(P[k].inKind.notCounted.filter((n) => n.reason !== 'status_not_counted_in_this_scenario'))).map((x) => [x.id, x])).values()];
     return `<details class="detail" ${state.options.indexOf(o) === 0 ? 'open' : ''}><summary>${esc(o.name)} — scenario detail</summary>
@@ -1427,7 +1458,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       const midP = Number((o.scenarioProceeds || {}).middle) || 0;
       if (t.proceeds && (d.proceedsLow > 0 || midP > 0)) lines.push(`Why break-even and middle-case net look different: break-even leaves out auction and raffle money because bids aren't promised. Your scenarios include about ${hm(d.proceedsLow)} (low) and ${hm(midP)} (middle) of it.`);
       if (top) lines.push(`The single assumption that moves the middle case most: “${top.label}” (${top.change >= 0 ? '+' : ''}${money(top.change)}).`);
-      if (P.middle.upfront.gap > 0) lines.push(`You would need ${money(P.middle.upfront.gap)} more cash than you have in hand before ${t.survey === 'buy' ? 'order money comes in' : 'the event'}.`);
+      if (d.firm.upfront.gap > 0) lines.push(`You would need ${money(d.firm.upfront.gap)} more cash than you have in hand${o.upfrontFundingConfirmed ? ' (the club has confirmed it can cover this)' : ''} before ${t.survey === 'buy' ? 'order money comes in' : 'the event'}.`);
       if (P.middle.sponsorshipByStatus.hoped > 0) lines.push(`${money(P.middle.sponsorshipByStatus.hoped)} of sponsorship is only hoped-for and is excluded from break-even.`);
       lines.push(t.survey === 'buy'
         ? `Evidence so far: ${d.paid} items already paid for; ${d.named} items from named “yes” answers${d.named !== d.namedCounted ? ` (not counted: they were for different or unrecorded terms)` : ''}; ${d.definitely} from anonymous “yes”; ${d.responses} survey responses. Survey interest is not a paid order.`
@@ -1439,7 +1470,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <p class="aloud"><b>What to tell the board (30 seconds):</b> ${esc(readAloud(o, d, P, (x) => money(E.roundHeadline(x))))}</p>
         <div class="cards">
           <div class="card ${beGap > 0 || !d.breakEven.reachableWithinCapacity ? 'bad' : ''}"><span>Break-even vs. evidence</span><b>${d.breakEven.reachableWithinCapacity ? d.breakEven.participants : '—'} needed · ${d.paid + d.namedCounted} paid or named</b><em>${esc(t.many)} needed on firm money${t.proceeds ? ', not counting auction bids,' : ''} vs. paid + named “yes” answers. Named answers are not money.</em></div>
-          <div class="card"><span>${t.survey === 'buy' ? 'Cash needed up front' : 'Cash needed before event day'}</span><b>${hm(P.middle.upfront.required)}</b><em>deposit + bills due before the event; short by ${hm(P.middle.upfront.gap)} vs. cash in hand</em></div>
+          <div class="card"><span>${t.survey === 'buy' ? 'Cash needed up front' : 'Cash needed before event day'}</span><b>${hm(d.firm.upfront.required)}</b><em>firm money only: deposit + bills due before the event; short by ${hm(d.firm.upfront.gap)} vs. cash in hand${d.firm.upfront.gap > 0 && !o.upfrontFundingConfirmed ? ' (not yet covered)' : ''}</em></div>
           <div class="card"><span>Contract floor</span><b>${hm(d.worst.contractualFloor)}</b><em>the least the ${esc(t.venue)} bills even if ${t.survey === 'buy' ? 'nothing sells' : 'nobody comes'}, from the minimums and deposit you entered</em></div>
           <div class="card ${d.worst.netIfNobodyRegisters < 0 ? 'bad' : ''}"><span>${t.survey === 'buy' ? 'Net if nothing sells' : 'Net if nobody registers'}</span><b>${hm(d.worst.netIfNobodyRegisters)}</b><em>collected sponsor cash minus the contract floor and all one-time costs, including ones paid later</em></div>
           <div class="card"><span>Middle-case net</span><b>${hm(P.middle.net)}</b><em>at the low number (${P.conservative.participants}): ${hm(P.conservative.net)}${t.proceeds ? '. Includes your auction and raffle estimate' : ''}</em></div>
@@ -1477,7 +1508,8 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       d.reasons.forEach((r) => L.push(`- ${r}`));
       L.push(`- Break-even (firm sponsorship only): ${d.breakEven.reachableWithinCapacity ? d.breakEven.participants + ' ' + T(o).many : 'not reachable within capacity'} of ${d.breakEven.maxFeasible} feasible.`);
       L.push(`- Net: conservative ${hm(P.conservative.net)} (${P.conservative.participants}), middle ${hm(P.middle.net)} (${P.middle.participants}), optimistic ${hm(P.optimistic.net)} (${P.optimistic.participants}).`);
-      L.push(`- Cash needed before the event: ${hm(P.middle.upfront.required)}. Worst case if nobody registers: ${hm(d.worst.netIfNobodyRegisters)}. Volunteer hours: ${P.middle.volunteerHours}.`);
+      L.push(`- Cash needed before the event (firm money only): ${hm(d.firm.upfront.required)}; cash in hand ${hm(d.firm.upfront.cashInHand)}${d.firm.upfront.registrationCashUnknown ? ' (registration money received not entered)' : ''}; short by ${hm(d.firm.upfront.gap)}${d.firm.upfront.gap > 0 ? (o.upfrontFundingConfirmed ? ' (club confirmed it can cover this)' : ' (not yet covered)') : ''}.`);
+      L.push(`- Worst case if nobody registers: ${hm(d.worst.netIfNobodyRegisters)}. Volunteer hours: ${P.middle.volunteerHours}.`);
       L.push(`- Evidence: ${d.paid} paid${P.middle.upfront.registrationCashUnknown ? ' (amount received not entered)' : ''}, ${d.named} named "yes"${d.named !== d.namedCounted ? ' (not counted: collected for different or unrecorded terms)' : ''}, ${d.definitely} anonymous "yes", ${d.responses} responses.`);
       if (d.missing.length) { L.push('- Must verify before signing:'); d.missing.forEach((m) => L.push(`  - ${m}`)); }
       if (d.cancel) L.push(`- If canceled after the quote's deadline: about ${money(E.roundHeadline(d.cancel.owedToVenue))} to the venue plus ${money(E.roundHeadline(d.cancel.alreadySpent))} already spent.`);
@@ -1590,12 +1622,12 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   }
 
   function render(focusTitle) {
-    persist();
     document.getElementById('demo-banner').hidden = !state.isDemo || view === 'home';
     document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('on', a.dataset.nav === view));
     document.getElementById('save-panel').hidden = !savePanel;
     const app = document.getElementById('app');
     app.innerHTML = view === 'wizard' ? viewWizard() : view === 'results' ? viewResults() : viewHome();
+    persist();
     const sl = app.querySelector('.steplist'), on = sl && sl.querySelector('li.on');
     if (sl && on && sl.scrollWidth > sl.clientWidth) sl.scrollLeft = on.offsetLeft - 16; // phones: show the current step pill
     if (focusTitle) {
@@ -1631,11 +1663,16 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   // Side effects of an edit that keep the evidence honest.
   function afterEdit(path, before) {
     const m = path.match(/^evidence\.(namedHighIntent|surveyDefinitelyAtPrice|surveyProbablyAtPrice)\.(.+)$/);
-    if (m) { // first time answers are entered for an option: record the offer they're for
-      const o = state.options.find((x) => x.id === m[2]);
+    if (m && before) { // record terms only when this option had NO survey answers before this edit
+      const idx = state.options.findIndex((x) => x.id === m[2]), o = state.options[idx];
       state.evidence.offerTerms = state.evidence.offerTerms || {};
-      if (o && !state.evidence.offerTerms[o.id]) state.evidence.offerTerms[o.id] = E.offerTerms(o, state.snapshot);
+      if (o && before[idx] === 'none' && !state.evidence.offerTerms[o.id]) {
+        const issued = (state.evidence.surveyIssuedTerms || {})[o.id];
+        state.evidence.offerTerms[o.id] = issued ? { ...issued } : E.offerTerms(o, state.snapshot); // the offer people actually saw, if the survey was copied here
+      }
     }
+    const dep = path.match(/^options\.(\d+)\.(deposit\.amount|fixedCosts\.\d+\.(amount|paidUpfront))$/);
+    if (dep && state.options[+dep[1]] && state.options[+dep[1]].upfrontFundingConfirmed) { state.options[+dep[1]].upfrontFundingConfirmed = false; say('Money due before the event changed, so the treasurer\'s confirmation was unchecked. Check it again once it\'s confirmed for the new amount.'); }
     const q = path.match(/^options\.(\d+)\.(venueQuote|deposit|capacity|groupSize|wholeGroupsOnly|cancellationOwed)\b/);
     if (q && state.options[+q[1]] && state.options[+q[1]].quoteVerified) { state.options[+q[1]].quoteVerified = false; say('You changed a quote number, so "I have this quote in writing" was unchecked. Check it again once the new number is in writing.'); }
     const k = path.match(/^options\.(\d+)\.(perParticipantCosts|fixedCosts)\.\d+\.amount$/);
@@ -1679,15 +1716,19 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     else if (a === 'dup-option') { const o = clone(state.options[i]); o.id = uid('opt_'); o.name += ' (copy)'; state.options.push(o); openOption = state.options.length - 1; }
     else if (a === 'del-option') { if (!armed(b, 'Click again to remove')) return; state.options.splice(i, 1); openOption = 0; }
     else if (a === 'fill-evidence') {
-      const o = state.options[i], ev = state.evidence;
-      const paid = (ev.paidRegistrations || {})[o.id] || 0, named = (ev.namedHighIntent || {})[o.id] || 0;
-      o.scenarioParticipants.conservative = paid;
-      o.scenarioParticipants.middle = paid + named;
+      const o = state.options[i], d = E.decide(state, o);
+      o.scenarioParticipants.conservative = d.paid;
+      o.scenarioParticipants.middle = d.paid + d.namedCounted; // stale or unrecorded answers don't count
     }
     else if (a === 'add-sponsor') state.sponsorships.push({ id: uid('sp_'), label: 'New sponsor', amount: 0, status: 'hoped', type: 'cash', optionId: '' });
     else if (a === 'del-sponsor') state.sponsorships.splice(j, 1);
     else if (a === 'toggle-survey') { surveyOpen = !surveyOpen; document.getElementById('survey').hidden = !surveyOpen; return; }
-    else if (a === 'copy-survey') return copyText(surveyText(), b);
+    else if (a === 'copy-survey') {
+      state.evidence.surveyIssuedTerms = state.evidence.surveyIssuedTerms || {};
+      state.options.forEach((o) => { state.evidence.surveyIssuedTerms[o.id] = E.offerTerms(o, state.snapshot); });
+      touched = true; persist();
+      return copyText(surveyText(), b);
+    }
     else if (a === 'copy-memo') return copyText(boardMemo(), b);
     else if (a === 'nav') return go(b.dataset.to);
     else if (a === 'opt-step') { openOption = i; render(true); window.scrollTo(0, 0); return; }
@@ -1724,27 +1765,47 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   // Check an imported plan before it replaces anything. Returns a list of plain-language problems (empty = OK).
   function validatePlan(s) {
     const p = [];
+    const SAFE_ID = /^[A-Za-z0-9_-]{1,40}$/;
     const isNum = (v) => v == null || v === '' || (typeof v === 'number' && Number.isFinite(v) && v >= 0);
-    if (!s || typeof s !== 'object') return ['The file is not a plan.'];
+    const isStr = (v) => v == null || typeof v === 'string';
+    const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+    if (!isObj(s)) return ['The file is not a plan.'];
+    if (!isStr(s.eventName)) p.push('The plan name must be text.');
     if (!Array.isArray(s.options) || !s.options.length) p.push('It has no fundraiser options.');
     const ids = new Set();
     (s.options || []).forEach((o, i) => {
       const n = `Option ${i + 1}`;
-      if (!o || typeof o !== 'object') { p.push(`${n} is not readable.`); return; }
-      if (typeof o.id !== 'string' || !o.id) p.push(`${n} has no id.`); else if (ids.has(o.id)) p.push(`${n} repeats the id "${o.id}".`); else ids.add(o.id);
-      ['price', 'capacity', 'groupSize', 'volunteerHours', 'cancellationOwed'].forEach((k) => { if (!isNum(o[k])) p.push(`${n}: "${k}" must be a number of 0 or more.`); });
-      if (!o.venueQuote || typeof o.venueQuote !== 'object') p.push(`${n} is missing its venue quote.`);
+      if (!isObj(o)) { p.push(`${n} is not readable.`); return; }
+      if (typeof o.id !== 'string' || !SAFE_ID.test(o.id)) p.push(`${n} has a missing or invalid id (letters, numbers, - and _ only).`); else if (ids.has(o.id)) p.push(`${n} repeats its id.`); else ids.add(o.id);
+      if (!isStr(o.name)) p.push(`${n}: the name must be text.`);
+      if (o.kind != null && !(o.kind in EVENT_TYPES)) p.push(`${n}: unknown kind of fundraiser.`);
+      ['price', 'groupPrice', 'groupShare', 'capacity', 'groupSize', 'volunteerHours', 'cancellationOwed'].forEach((k) => { if (!isNum(o[k])) p.push(`${n}: "${k}" must be a number of 0 or more.`); });
+      if (!isObj(o.venueQuote)) p.push(`${n} is missing its venue quote.`);
       else ['flatFee', 'perParticipant', 'minimumParticipants', 'minimumSpend'].forEach((k) => { if (!isNum(o.venueQuote[k])) p.push(`${n}: venue "${k}" must be a number of 0 or more.`); });
-      if (!o.deposit || typeof o.deposit !== 'object' || !isNum(o.deposit.amount)) p.push(`${n} is missing a valid deposit.`);
-      ['perParticipantCosts', 'fixedCosts'].forEach((k) => { if (!Array.isArray(o[k]) || o[k].some((r) => !r || !isNum(r.amount))) p.push(`${n}: ${k} must be a list of costs with amounts.`); });
-      if (!o.scenarioParticipants || typeof o.scenarioParticipants !== 'object') p.push(`${n} is missing its low/likely/high numbers.`);
+      if (!isObj(o.deposit) || !isNum(o.deposit.amount)) p.push(`${n} is missing a valid deposit.`);
+      ['perParticipantCosts', 'fixedCosts'].forEach((k) => { if (!Array.isArray(o[k]) || o[k].some((r) => !isObj(r) || !isNum(r.amount) || !isStr(r.label) || (r.id != null && !SAFE_ID.test(String(r.id))))) p.push(`${n}: ${k} must be a list of costs with names and amounts.`); });
+      ['scenarioParticipants', 'scenarioProceeds'].forEach((k) => { if (k === 'scenarioParticipants' && !isObj(o[k])) p.push(`${n} is missing its low/likely/high numbers.`); else if (o[k] != null && (!isObj(o[k]) || Object.values(o[k]).some((v) => !isNum(v)))) p.push(`${n}: ${k} must hold numbers.`); });
     });
     const ss = s.scenarioSettings;
-    if (!ss || !['conservative', 'middle', 'optimistic'].every((k) => ss[k] && Array.isArray(ss[k].statuses))) p.push('Scenario settings are missing or incomplete.');
+    if (!isObj(ss) || !['conservative', 'middle', 'optimistic'].every((k) => isObj(ss[k]) && Array.isArray(ss[k].statuses) && ss[k].statuses.every((x) => E.SPONSOR_STATUSES.includes(x)) && ['extraRevenuePerParticipant', 'otherRevenue', 'costContingencyPct'].every((f) => isNum(ss[k][f])) && isStr(ss[k].label))) p.push('Scenario settings are missing or incomplete.');
     if (!Array.isArray(s.sponsorships)) p.push('Sponsorships must be a list.');
-    else if (s.sponsorships.some((x) => !x || !isNum(x.amount) || !E.SPONSOR_STATUSES.includes(x.status))) p.push('A sponsorship has a bad amount or status.');
-    if (!s.evidence || typeof s.evidence !== 'object') p.push('Survey and payment evidence is missing.');
-    if (!s.settings || typeof s.settings !== 'object') p.push('Plan settings are missing.');
+    else if (s.sponsorships.some((x) => !isObj(x) || !isNum(x.amount) || !E.SPONSOR_STATUSES.includes(x.status) || !['cash', 'inKind'].includes(x.type) || !isStr(x.label) || (x.optionId && !ids.has(x.optionId)) || (x.replacesCostId && !SAFE_ID.test(String(x.replacesCostId))) || (x.id != null && !SAFE_ID.test(String(x.id))))) p.push('A sponsorship has a bad amount, status, type or link.');
+    const ev = s.evidence;
+    if (!isObj(ev)) p.push('Survey and payment evidence is missing.');
+    else {
+      if (!isNum(ev.surveyResponses)) p.push('The number of survey responses must be a number.');
+      ['paidRegistrations', 'paidCashReceived', 'namedHighIntent', 'surveyDefinitelyAtPrice', 'surveyProbablyAtPrice'].forEach((k) => {
+        if (ev[k] == null) return;
+        if (!isObj(ev[k]) || Object.entries(ev[k]).some(([id, v]) => !ids.has(id) || !isNum(v))) p.push(`Evidence "${k}" must hold numbers for this plan's options only.`);
+      });
+      ['offerTerms', 'surveyIssuedTerms'].forEach((k) => {
+        if (ev[k] == null) return;
+        if (!isObj(ev[k]) || Object.entries(ev[k]).some(([id, t]) => !ids.has(id) || !isObj(t) || Object.values(t).some((v) => v != null && !['string', 'number'].includes(typeof v)))) p.push(`Evidence "${k}" is not readable.`);
+      });
+    }
+    if (!isObj(s.settings) || !isNum(s.settings.fundraisingTarget) || !isNum(s.settings.volunteerHourValue)) p.push('Plan settings are missing or not numbers.');
+    if (!isNum(s.volunteerHoursAvailable)) p.push('Volunteer hours available must be a number.');
+    if (s.snapshot != null && (!isObj(s.snapshot) || Object.values(s.snapshot).some((v) => !isStr(v)))) p.push('Survey details must be text.');
     return p;
   }
   function importJson(f) {
@@ -1753,8 +1814,19 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         const s = JSON.parse(t);
         const problems = validatePlan(s);
         if (problems.length) throw new Error(problems.slice(0, 3).join(' ') + (problems.length > 3 ? ` (${problems.length - 3} more)` : ''));
-        try { const prev = localStorage.getItem(SAVE_KEY); if (prev) localStorage.setItem(SAVE_KEY + '-backup', prev); } catch (e) { /* ignore */ }
-        state = migrate(s); openOption = 0; touched = true; render(); say('Plan imported. Your previous plan was kept as a backup in this browser.');
+        const candidate = migrate(clone(s));
+        const prevState = state, prevSaved = (() => { try { return localStorage.getItem(SAVE_KEY); } catch (e) { return null; } })();
+        try {
+          state = candidate;
+          // Dry run: every calculation and page the plan feeds must work before anything is replaced.
+          candidate.options.forEach((o) => { analyse(o); });
+          viewResults(); viewWizard(); boardMemo();
+        } catch (err) { state = prevState; throw new Error('the plan has values the planner cannot use (' + err.message + ').'); }
+        let backedUp = false;
+        try { if (prevSaved) { localStorage.setItem(SAVE_KEY + '-backup', prevSaved); backedUp = true; } } catch (e) { /* ignore */ }
+        openOption = 0; touched = true;
+        try { render(); } catch (err) { state = prevState; try { if (prevSaved) localStorage.setItem(SAVE_KEY, prevSaved); } catch (e) { /* ignore */ } render(); throw err; }
+        say(backedUp ? 'Plan imported. Your previous plan was kept as a backup in this browser.' : 'Plan imported.');
       } catch (err) { say('Could not import that file: ' + err.message); }
     });
   }
@@ -1762,6 +1834,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     const map = { named_high_intent: 'namedHighIntent', definitely_at_price: 'surveyDefinitelyAtPrice', probably_at_price: 'surveyProbablyAtPrice', paid_registrations: 'paidRegistrations', cash_received: 'paidCashReceived' };
     readFile(f, (t) => {
       const errs = []; let n = 0;
+      const before = state.options.map((o) => E.evidenceStatus(state, o).state);
       t.split(/\r?\n/).slice(1).forEach((line, k) => {
         if (!line.trim()) return;
         const [metric, optionId, value] = line.split(',').map((x) => x.trim());
@@ -1772,7 +1845,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
           if (!state.options.some((o) => o.id === optionId)) { errs.push(`row ${k + 2}: unknown option_id "${optionId}"`); return; }
           state.evidence[map[metric]] = state.evidence[map[metric]] || {};
           state.evidence[map[metric]][optionId] = metric === 'cash_received' ? v : Math.floor(v); n++;
-          afterEdit(`evidence.${map[metric]}.${optionId}`);
+          afterEdit(`evidence.${map[metric]}.${optionId}`, before);
         } else errs.push(`row ${k + 2}: unknown metric "${metric}"`);
       });
       render();
@@ -1815,6 +1888,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   window.addEventListener('hashchange', () => { readHash(); render(true); window.scrollTo(0, 0); });
   readHash();
   render();
+  if (startupNote) say(startupNote);
 })();
 </script>
 </body>

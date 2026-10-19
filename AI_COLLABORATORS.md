@@ -19,6 +19,8 @@ William owns this project and decides what gets merged. Claude is the lead imple
 - **Survey answers belong to the offer they were collected for.** If the price or event details change, the answers stop counting until re-asked or confirmed.
 - **Break-even counts firm money only:** ticket money plus collected or committed sponsorship. Add-ons, other income and auction estimates appear in scenarios and as a labeled conditional break-even, never in the firm number.
 - **The math lives only in `src/engine.js`**, uses integer cents, and every change comes with a test in `test/engine.test.js`.
+- **Imported or saved plans are untrusted.** Validate types before using them, and escape everything shown on the page (`esc()`), even values that "should" be numbers or ids.
+- **Tickets already paid keep the money actually received.** Projections never reprice them at a new price.
 - **Privacy:** no student or minor data, no names or contact details stored in the planner, no tracking or analytics, no accounts.
 - **No legal or tax claims:** nothing about tax deductibility, nonprofit eligibility or guaranteed results.
 - **Nothing gets sent or bought:** no emails or messages, no payments, no paid services, no publishing without William's approval.
