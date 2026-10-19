@@ -88,6 +88,49 @@ with sync_playwright() as p:
     # back to the golf example for the remaining checks
     pg.goto(URL + '#home'); pg.click('[data-demo="golf"]'); pg.click('[data-demo="golf"]')
     pg.wait_for_function("location.hash === '#step-event'", timeout=3000)
+    # ---- audit fixes, end to end ----
+    pg.goto(URL + '#home'); pg.click('[data-demo="golf"]'); pg.click('[data-demo="golf"]')
+    pg.wait_for_function("location.hash === '#step-event'", timeout=3000)
+    # F2: survey answers are tied to the offer; a price change makes them stale until confirmed
+    pg.goto(URL + '#step-evidence'); pg.wait_for_timeout(60)
+    assert pg.locator('[data-terms="tee"].ok').count() == 1, 'example answers should be recorded for the current offer'
+    pg.goto(URL + '#step-prices'); pg.wait_for_timeout(60)
+    pg.fill('input[data-path="options.0.price"]', '175'); pg.press('input[data-path="options.0.price"]', 'Tab'); pg.wait_for_timeout(80)
+    assert "won't count toward the decision" in pg.inner_text('#status'), 'price change should warn that answers are stale'
+    pg.goto(URL + '#results'); pg.wait_for_timeout(60)
+    assert 'collected for different terms' in pg.inner_text('#app')
+    pg.goto(URL + '#step-evidence'); pg.wait_for_timeout(60)
+    assert pg.locator('[data-terms="tee"].warn-callout').count() == 1
+    pg.click('[data-action="confirm-terms"][data-i="0"]'); pg.click('[data-action="confirm-terms"][data-i="0"]'); pg.wait_for_timeout(60)
+    assert pg.locator('[data-terms="tee"].ok').count() == 1, 'confirming should record the current offer'
+    # F1: paid people without an amount received are flagged and not counted as cash
+    pg.fill('input[data-path="evidence.paidRegistrations.tee"]', '4'); pg.press('input[data-path="evidence.paidRegistrations.tee"]', 'Tab'); pg.wait_for_timeout(80)
+    pg.goto(URL + '#results'); pg.wait_for_timeout(60)
+    assert 'registration money received not entered' in pg.inner_text('#app')
+    pg.goto(URL + '#step-evidence'); pg.wait_for_timeout(60)
+    pg.fill('input[data-path="evidence.paidCashReceived.tee"]', '460'); pg.press('input[data-path="evidence.paidCashReceived.tee"]', 'Tab'); pg.wait_for_timeout(80)
+    pg.goto(URL + '#results'); pg.wait_for_timeout(60)
+    rt2 = pg.inner_text('#app')
+    assert 'registration money received not entered' not in rt2 and 'amount actually received is not entered' not in rt2, 'entered cash should clear the flag'
+    # editing a verified quote number unchecks "in writing"
+    pg.goto(URL + '#step-quote'); pg.wait_for_timeout(60)
+    pg.check('input[data-path="options.0.quoteVerified"]'); pg.wait_for_timeout(80)
+    pg.fill('input[data-path="options.0.venueQuote.perParticipant"]', '60'); pg.press('input[data-path="options.0.venueQuote.perParticipant"]', 'Tab'); pg.wait_for_timeout(80)
+    assert not pg.is_checked('input[data-path="options.0.quoteVerified"]'), 'quote edit should uncheck verification'
+    # import: a broken plan is rejected and the current plan is kept; a good export round-trips
+    name_before = pg.evaluate("JSON.parse(localStorage.getItem('bfp-plan-v1')).eventName")
+    bad = '{"options":[{"id":"x","price":-5}],"scenarioSettings":{},"sponsorships":[],"evidence":{},"settings":{}}'
+    pg.click('[data-action="toggle-save"]'); pg.wait_for_timeout(40)
+    pg.set_input_files('input[data-action="import-json"]', files=[{'name': 'bad.json', 'mimeType': 'application/json', 'buffer': bad.encode()}]); pg.wait_for_timeout(150)
+    assert 'Could not import' in pg.inner_text('#status'), 'bad import must be rejected'
+    assert pg.evaluate("JSON.parse(localStorage.getItem('bfp-plan-v1')).eventName") == name_before, 'bad import must not replace the plan'
+    pg.click('[data-action="export"]'); good = pg.input_value('#export-text')
+    pg.set_input_files('input[data-action="import-json"]', files=[{'name': 'good.json', 'mimeType': 'application/json', 'buffer': good.encode()}]); pg.wait_for_timeout(150)
+    assert 'Plan imported' in pg.inner_text('#status'), 'a real export should import'
+    assert pg.evaluate("!!localStorage.getItem('bfp-plan-v1-backup')"), 'previous plan kept as backup'
+    pg.click('[data-action="toggle-save"]')
+    pg.goto(URL + '#home'); pg.click('[data-demo="golf"]'); pg.click('[data-demo="golf"]')
+    pg.wait_for_function("location.hash === '#step-event'", timeout=3000)
     # editing recomputes: shotgun price below cost -> not viable
     pg.goto(URL + '#step-prices'); pg.click('.tab >> nth=1')
     pg.fill('input[data-path="options.1.price"]', '60'); pg.press('input[data-path="options.1.price"]', 'Tab')

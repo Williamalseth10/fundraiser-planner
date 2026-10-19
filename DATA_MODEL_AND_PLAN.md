@@ -13,18 +13,20 @@ Plan {
   isDemo, eventName,
   settings: { fundraisingTarget, volunteerHourValue|null },
   volunteerHoursAvailable|null,
-  snapshot: { format, dateWindow, locationArea, included, beneficiary, pricePoints },
+  snapshot: { format, dateWindow, locationArea, included, beneficiary, fallbackPrice },
   scenarioSettings: { conservative|middle|optimistic: {
       label, statuses: ['collected'|'committed'|'hoped'], extraRevenuePerParticipant, otherRevenue, costContingencyPct } },
   options: [ EventOption ],
   sponsorships: [ Sponsorship ],
-  evidence: { surveyResponses, paidRegistrations{optId:n}, namedHighIntent{optId:n},
-              surveyDefinitelyAtPrice{optId:n}, surveyProbablyAtPrice{optId:n} }
+  evidence: { surveyResponses, paidRegistrations{optId:n}, paidCashReceived{optId:$|null},
+              namedHighIntent{optId:n}, surveyDefinitelyAtPrice{optId:n}, surveyProbablyAtPrice{optId:n},
+              offerTerms{optId: {kind, price, groupSize, groupPrice, format, date, place, included}} }
 }
 EventOption {
-  id, name, kind: golf_tee_times|golf_shotgun|generic,
+  id, name, kind: golf_tee_times|golf_shotgun|participation|ticketed|auction|product|generic,
   capacity, groupSize, wholeGroupsOnly,
-  price, foursomePrice|null, foursomeShare (0..1),
+  price, groupPrice|null, groupShare (0..1)   (older plans: foursomePrice/foursomeShare, migrated on load),
+  scenarioProceeds { conservative, middle, optimistic } (auction/raffle estimates; never in break-even), cancellationOwed|null,
   venueQuote: { flatFee, perParticipant, minimumParticipants, minimumSpend },
   deposit: { amount, creditedTowardBill, refundable },
   perParticipantCosts: [{id,label,amount}], fixedCosts: [{id,label,amount,paidUpfront}],

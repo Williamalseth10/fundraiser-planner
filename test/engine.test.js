@@ -157,13 +157,15 @@ test('hoped-for in-kind does not reduce costs in a firm scenario', () => {
   assert.equal(r.expenses.fixed, 500);
 });
 
-test('cash in hand counts only collected sponsorship and paid registrations', () => {
+// Updated 2026-10-19 (audit F1, DECISION_LOG row 42): registration cash is the amount actually received,
+// not price x paid headcount. Committed sponsorship is still excluded from cash in hand.
+test('cash in hand counts only collected sponsorship and registration money actually received', () => {
   const sponsorships = [
     { id: 'a', amount: 300, status: 'collected', type: 'cash' },
     { id: 'b', amount: 900, status: 'committed', type: 'cash' },
   ];
-  const r = E.project(base(), 40, ctx({ sponsorships, paidRegistrations: 2 }));
-  assert.equal(r.upfront.cashInHand, 300 + 2 * 150);
+  const r = E.project(base(), 40, ctx({ sponsorships, paidRegistrations: 2, paidRegistrationCash: 300 }));
+  assert.equal(r.upfront.cashInHand, 300 + 300);
   assert.equal(r.upfront.required, 400);
   assert.equal(r.upfront.gap, 0);
 });
@@ -197,12 +199,15 @@ test('decision: unreachable break-even yields "not viable as configured"', () =>
   assert.equal(dcs.status, 'not_viable_as_configured');
 });
 
+// Fixture updated 2026-10-19 (audit F1/F2 + readiness, DECISION_LOG rows 42-46): the strongest result now also needs the
+// survey's offer terms recorded, the amount received entered, and the cancellation amount known. The rule under test is unchanged.
 test('decision: strongest result requires verified quote AND firm demand covering break-even', () => {
-  const o = { ...base(), quoteVerified: true, costsVerified: true, scenarioParticipants: { conservative: 24 } };
+  const o = { ...base(), quoteVerified: true, costsVerified: true, cancellationOwed: 0, scenarioParticipants: { conservative: 24 } };
   const state = {
-    settings: {}, sponsorships: [], volunteerHoursAvailable: 100,
-    evidence: { surveyResponses: 30, paidRegistrations: { opt: 4 }, namedHighIntent: { opt: 4 }, surveyDefinitelyAtPrice: { opt: 20 } },
+    settings: {}, sponsorships: [], volunteerHoursAvailable: 100, snapshot: {},
+    evidence: { surveyResponses: 30, paidRegistrations: { opt: 4 }, paidCashReceived: { opt: 600 }, namedHighIntent: { opt: 4 }, surveyDefinitelyAtPrice: { opt: 20 } },
   };
+  state.evidence.offerTerms = { opt: E.offerTerms(o, state.snapshot) };
   assert.equal(E.decide(state, o).status, 'supported_by_current_evidence');
   state.evidence.namedHighIntent.opt = 2; // 4 + 2 < 8 needed; 20 anonymous "definitely" do NOT rescue it
   assert.equal(E.decide(state, o).status, 'not_enough_evidence');

@@ -12,9 +12,12 @@ William owns this project and decides what gets merged. Claude is the lead imple
 ## Rules that don't change without William's explicit OK
 - **No invented data.** No made-up course prices, regional benchmarks, attendance rates, conversion percentages or "typical" sponsorship amounts. The example data stays labeled as fictional.
 - **No predicting attendance** from survey interest or demographics. Interest is shown beside the plan, never converted into expected headcount.
-- **Break-even uses only collected or committed sponsorship**, and only paid sign-ups plus named "yes" answers count as evidence.
+- **Break-even uses only collected or committed sponsorship**, and only paid sign-ups plus named "yes" answers for the current offer count as evidence.
 - **"Not enough evidence to decide yet" stays a valid result.** It's the default until a written quote and real supporter answers exist.
 - **In-kind donations are never cash.** They only reduce a cost they replace.
+- **Cash in hand is entered, never computed.** Money received comes from the organizer's records, not price × people.
+- **Survey answers belong to the offer they were collected for.** If the price or event details change, the answers stop counting until re-asked or confirmed.
+- **Break-even counts firm money only:** ticket money plus collected or committed sponsorship. Add-ons, other income and auction estimates appear in scenarios and as a labeled conditional break-even, never in the firm number.
 - **The math lives only in `src/engine.js`**, uses integer cents, and every change comes with a test in `test/engine.test.js`.
 - **Privacy:** no student or minor data, no names or contact details stored in the planner, no tracking or analytics, no accounts.
 - **No legal or tax claims:** nothing about tax deductibility, nonprofit eligibility or guaranteed results.

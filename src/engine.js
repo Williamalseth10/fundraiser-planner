@@ -174,8 +174,13 @@
     const dep = c((option.deposit || {}).amount);
     const upfrontFixed = ik.lines.filter((l) => l.paidUpfront).reduce((s, l) => s + (l.cents - l.reducedBy), 0);
     const upfront = dep + upfrontFixed;
-    const paidRegs = Math.min(int(ctx.paidRegistrations), maxFeasible(option));
-    const inHand = sp.byStatus.collected + c(option.price) * paidRegs;
+    // Cash in hand = collected sponsorship + registration money actually received (entered by the organizer).
+    // Never price x paid headcount: group deals, discounts and price changes make that wrong.
+    // If people have paid but the amount isn't entered, their money is left out and flagged, so the gap errs high.
+    const paidRegs = int(ctx.paidRegistrations);
+    const cashKnown = ctx.paidRegistrationCash != null && ctx.paidRegistrationCash !== '';
+    const regCash = cashKnown ? c(nonNeg(ctx.paidRegistrationCash)) : 0;
+    const inHand = sp.byStatus.collected + regCash;
 
     return {
       participants: n,
@@ -192,7 +197,7 @@
       },
       inKind: { applied: ik.applied, notCounted: ik.notCounted },
       net: d(net),
-      upfront: { required: d(upfront), cashInHand: d(inHand), gap: d(Math.max(0, upfront - inHand)) },
+      upfront: { required: d(upfront), cashInHand: d(inHand), registrationCash: cashKnown ? d(regCash) : null, registrationCashUnknown: paidRegs > 0 && !cashKnown, gap: d(Math.max(0, upfront - inHand)) },
       volunteerHours: nonNeg(option.volunteerHours),
     };
   }
@@ -283,6 +288,43 @@
     return Math.round(n / step) * step;
   }
 
+  /**
+   * The offer supporters were asked about: what a "yes" in the survey was a yes TO.
+   * Survey answers only support the decision for the same offer. Money values are in cents.
+   */
+  function offerTerms(option, snapshot) {
+    const size = Math.max(1, int(option.groupSize) || 1);
+    const gpRaw = option.groupPrice !== undefined ? option.groupPrice : option.foursomePrice;
+    const sn = snapshot || {};
+    const txt = (v) => String(v == null ? '' : v).trim();
+    return {
+      kind: option.kind || '',
+      price: c(option.price),
+      groupSize: size,
+      groupPrice: size > 1 ? (gpRaw == null || gpRaw === '' ? c(option.price) * size : c(gpRaw)) : null,
+      format: txt(sn.format), date: txt(sn.dateWindow), place: txt(sn.locationArea), included: txt(sn.included),
+    };
+  }
+  const TERM_LABELS = { kind: 'kind of event', price: 'price', groupSize: 'group size', groupPrice: 'group price', format: 'event description', date: 'date', place: 'location', included: 'what the price includes' };
+
+  /**
+   * Are this option's survey answers about the offer as it stands now?
+   *  none       - no survey answers for this option
+   *  current    - answers were recorded against the same terms
+   *  stale      - terms changed since (lists what changed)
+   *  unrecorded - answers exist but nobody recorded what they were for (older plans)
+   */
+  function evidenceStatus(state, option) {
+    const ev = state.evidence || {};
+    const surveyCount = int((ev.namedHighIntent || {})[option.id]) + int((ev.surveyDefinitelyAtPrice || {})[option.id]) + int((ev.surveyProbablyAtPrice || {})[option.id]);
+    if (!surveyCount) return { state: 'none', changed: [] };
+    const rec = (ev.offerTerms || {})[option.id];
+    if (!rec) return { state: 'unrecorded', changed: [] };
+    const now = offerTerms(option, state.snapshot);
+    const changed = Object.keys(TERM_LABELS).filter((k) => String(rec[k] ?? '') !== String(now[k] ?? '')).map((k) => TERM_LABELS[k]);
+    return { state: changed.length ? 'stale' : 'current', changed, recorded: rec, now };
+  }
+
   /** Build the scenario context for an option from app state. */
   function scenarioContext(state, option, scenarioKey) {
     const sc = (state.scenarioSettings || {})[scenarioKey] || {};
@@ -294,6 +336,7 @@
       otherRevenue: (Number(sc.otherRevenue) || 0) + (Number(((option.scenarioProceeds || {})[scenarioKey])) || 0),
       costContingencyPct: sc.costContingencyPct || 0,
       paidRegistrations: ((state.evidence || {}).paidRegistrations || {})[option.id] || 0,
+      paidRegistrationCash: (((state.evidence || {}).paidCashReceived || {})[option.id] ?? null),
     };
   }
 
@@ -306,59 +349,81 @@
     const target = nonNeg((state.settings || {}).fundraisingTarget);
     const consCtx = scenarioContext(state, option, 'conservative');
     const cons = project(option, (option.scenarioParticipants || {}).conservative, consCtx);
-    // Break-even uses only sponsorship that is collected or committed in writing.
-    // Break-even counts only firm money: collected/committed sponsorship and no auction or raffle estimates.
     const proceedsLow = Number(((option.scenarioProceeds || {}).conservative)) || 0;
-    const firmCtx = { ...consCtx, statuses: ['collected', 'committed'], otherRevenue: Math.max(0, (Number(consCtx.otherRevenue) || 0) - proceedsLow) };
+    // FIRM break-even: ticket/registration money plus collected or committed sponsorship. Nothing assumed:
+    // no per-person add-ons, no "other income", no auction or raffle estimates.
+    const firmCtx = { ...consCtx, statuses: ['collected', 'committed'], extraRevenuePerParticipant: 0, otherRevenue: 0 };
     const be = participantsNeeded(option, 0, firmCtx);
     const tg = participantsNeeded(option, target, firmCtx);
+    // CONDITIONAL break-even: the same, plus the organizer's own low-case assumptions. Reported, never relied on.
+    const assumed = { addOns: nonNeg(consCtx.extraRevenuePerParticipant), other: Math.max(0, (Number(consCtx.otherRevenue) || 0) - proceedsLow), auction: proceedsLow };
+    const uses = [];
+    if (assumed.addOns > 0) uses.push('add-ons');
+    if (assumed.other > 0) uses.push('other income');
+    if (assumed.auction > 0) uses.push('auction or raffle money');
+    const conditional = uses.length ? { ...participantsNeeded(option, 0, { ...firmCtx, extraRevenuePerParticipant: assumed.addOns, otherRevenue: assumed.other + assumed.auction }), uses, assumed } : null;
+
     const paid = int((ev.paidRegistrations || {})[option.id]);
     const named = int((ev.namedHighIntent || {})[option.id]);
     const definitely = int((ev.surveyDefinitelyAtPrice || {})[option.id]);
     const responses = int(ev.surveyResponses);
+    const evidence = evidenceStatus(state, option);
+    // Survey answers only count toward the support check if they were collected for the offer as it stands now.
+    const namedCounted = evidence.state === 'current' ? named : 0;
 
     const missing = [];
     if (!option.quoteVerified) missing.push('Written venue or supplier quote (price, minimums, deposit terms, cancellation terms) has not been verified.');
     if (!option.costsVerified) missing.push('Other costs (food, prizes, supplies, insurance, printing) are estimates, not quotes.');
     if (responses === 0) missing.push('No survey responses entered yet.');
+    if (evidence.state === 'stale') missing.push(`Survey answers were collected for different terms (${evidence.changed.join(', ')} changed since). Re-ask supporters about the current offer, or confirm the answers still apply.`);
+    if (evidence.state === 'unrecorded') missing.push('Survey answers are entered, but not which price and terms they were for. Confirm them on the "What did supporters say?" step.');
     if (paid === 0) missing.push('No paid sign-ups, tickets or orders yet.');
+    if (paid > 0 && consCtx.paidRegistrationCash == null) missing.push('People have paid, but the amount actually received is not entered, so it is left out of cash in hand.');
     if (option.cancellationOwed == null || option.cancellationOwed === '') missing.push('What you would owe if you cancel after the deadline on the quote has not been entered.');
     if (state.volunteerHoursAvailable == null || state.volunteerHoursAvailable === '') missing.push('Volunteer hours actually available are unknown.');
     else if (nonNeg(option.volunteerHours) > nonNeg(state.volunteerHoursAvailable)) missing.push(`Estimated volunteer need (${nonNeg(option.volunteerHours)} h) exceeds hours available (${nonNeg(state.volunteerHoursAvailable)} h).`);
 
     const reasons = [];
     let status;
-    // For auction/raffle nights, firm money alone often can't cover costs by design (e.g., free admission).
-    // Then check whether the organizer's own LOW auction figure would cover them: if yes, it's high risk, not "not viable".
-    const beWithLowProceeds = proceedsLow > 0 && !be.reachableWithinCapacity ? participantsNeeded(option, 0, { ...firmCtx, otherRevenue: (Number(firmCtx.otherRevenue) || 0) + proceedsLow }) : null;
-    if (!be.reachableWithinCapacity && beWithLowProceeds && beWithLowProceeds.reachableWithinCapacity) {
+    const assumedWords = (u) => u.join(', ').replace(/, ([^,]*)$/, ' and $1');
+    if (!be.reachableWithinCapacity && conditional && conditional.reachableWithinCapacity) {
       status = 'high_risk';
-      reasons.push(`Tickets and firm sponsorship can't cover costs even at full capacity (${be.maxFeasible}). It works only if auction or raffle money reaches your low estimate of $${proceedsLow.toFixed(2)}, with ${beWithLowProceeds.participants} paying. Bids aren't promised.`);
+      reasons.push(`Tickets and firm sponsorship can't cover costs even at full capacity (${be.maxFeasible}). It works only if your low-case ${assumedWords(conditional.uses)} come in, with ${conditional.participants} paying. Those are assumptions, not commitments.`);
     } else if (!be.reachableWithinCapacity) {
       status = 'not_viable_as_configured';
-      reasons.push(`Even at full capacity (${be.maxFeasible}) the event loses $${Math.abs(be.netAtCapacity).toFixed(2)} with only collected/committed sponsorship${proceedsLow > 0 ? ', and your low auction or raffle estimate doesn\'t close the gap' : ''}.`);
+      reasons.push(`Even at full capacity (${be.maxFeasible}) the event loses $${Math.abs(be.netAtCapacity).toFixed(2)} with only collected/committed sponsorship${conditional ? `, and your low-case ${assumedWords(conditional.uses)} don't close the gap` : ''}.`);
     } else if (!option.quoteVerified || (responses === 0 && paid === 0)) {
       status = 'not_enough_evidence';
       reasons.push('Key costs or demand have not been checked against real quotes or real supporter responses.');
-    } else if (be.participants > paid + named) {
+    } else if (be.participants > paid + namedCounted) {
       status = 'not_enough_evidence';
-      reasons.push(`Break-even needs ${be.participants} participants; paid registrations (${paid}) plus named high-intent leads (${named}) total ${paid + named}. Anonymous "definitely" answers (${definitely}) are shown but not counted toward this check.`);
+      reasons.push(`Break-even needs ${be.participants} participants; paid registrations (${paid}) plus named “yes” answers for the current offer (${namedCounted}) total ${paid + namedCounted}.${named > namedCounted ? ` ${named} named answers aren't counted because they were for different or unrecorded terms.` : ''} Anonymous “yes” answers (${definitely}) are shown but not counted toward this check.`);
+    } else if (be.nonMonotonic) {
+      status = 'high_risk';
+      reasons.push(`Net drops below zero again at a higher headcount than break-even (${be.participants}), usually because of group pricing or a minimum. Check the chart before relying on a single break-even number.`);
     } else if (cons.net < 0) {
       status = 'high_risk';
       reasons.push(`The conservative scenario loses $${Math.abs(cons.net).toFixed(2)}.`);
     } else {
-      status = 'supported_by_current_evidence';
-      reasons.push(`The break-even headcount (${be.participants}) is at or below paid registrations plus named “yes” answers (${paid + named}). Named answers are not revenue. Using the conservative turnout you entered, that scenario nets $${cons.net.toFixed(2)}. This is not a prediction.`);
+      status = missing.length ? 'supported_with_open_items' : 'supported_by_current_evidence';
+      reasons.push(`The break-even headcount (${be.participants}) is at or below paid registrations plus named “yes” answers (${paid + namedCounted}). Named answers are not revenue. Using the conservative turnout you entered, that scenario nets $${cons.net.toFixed(2)}. This is not a prediction.`);
+      if (missing.length) reasons.push(`${missing.length} item${missing.length > 1 ? 's' : ''} below still need checking before anyone signs.`);
     }
+    if (be.reachableWithinCapacity && conditional && conditional.participants !== be.participants) reasons.push(`With your low-case ${assumedWords(conditional.uses)}, break-even would be ${conditional.participants}${conditional.reachableWithinCapacity ? '' : ' (not reachable)'}. That depends on assumptions, so the firm number above is the one to rely on.`);
     if (target > 0 && !tg.reachableWithinCapacity) reasons.push(`The $${target.toLocaleString('en-US')} target is not reachable even at full capacity with only collected/committed sponsorship (max ≈ $${Math.round(tg.netAtCapacity).toLocaleString('en-US')}).`);
 
-    return { status, reasons, missing, breakEven: be, targetNeeded: tg, conservative: cons, paid, named, definitely, responses, worst: worstCase(option, state.sponsorships), cancel: cancellationExposure(option, state.sponsorships), proceedsLow, beWithLowProceeds };
+    return {
+      status, reasons, missing, breakEven: be, targetNeeded: tg, conservative: cons, paid, named, namedCounted, definitely, responses, evidence,
+      worst: worstCase(option, state.sponsorships), cancel: cancellationExposure(option, state.sponsorships), proceedsLow, conditional,
+      beWithLowProceeds: conditional, // kept for older callers
+    };
   }
 
   const STATUS_LABELS = {
     not_enough_evidence: 'Not enough evidence to decide yet',
     not_viable_as_configured: 'Not viable as currently configured',
     high_risk: 'High financial risk',
+    supported_with_open_items: 'Numbers hold up so far, but open items remain',
     supported_by_current_evidence: 'Supported by current evidence (not a guarantee)',
   };
 
@@ -366,7 +431,7 @@
     SPONSOR_STATUSES, STATUS_LABELS,
     participantStep, maxFeasible, feasibleCounts, normalizeParticipants,
     registrationCents, worstCase, cancellationExposure, roundHeadline,
-    project, participantsNeeded, netCurve, sensitivity, scenarioContext, decide,
+    project, participantsNeeded, netCurve, sensitivity, scenarioContext, decide, offerTerms, evidenceStatus,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
