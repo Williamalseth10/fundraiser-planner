@@ -66,13 +66,15 @@
   // ---------- inputs ----------
   function costRows(i, key, withUpfront) {
     const rows = state.options[i][key];
-    const kind = withUpfront ? 'One-time cost' : 'Per-person cost';
+    const product = T(state.options[i]).survey === 'buy';
+    const upfront = product ? 'Paid before order money comes in?' : 'Paid before event day?';
+    const kind = withUpfront ? 'One-time cost' : `Per-${T(state.options[i]).one} cost`;
     const nm = (r, j) => esc(r.label || `${kind} ${j + 1}`);
-    return `<div class="table-wrap"><table class="edit"><thead><tr><th>Cost item</th><th>Amount ($)</th>${withUpfront ? '<th>Paid before event day?</th>' : ''}<th><span class="sr-only">Remove</span></th></tr></thead><tbody>
+    return `<div class="table-wrap"><table class="edit"><thead><tr><th>Cost item</th><th>Amount ($)</th>${withUpfront ? `<th>${upfront}</th>` : ''}<th><span class="sr-only">Remove</span></th></tr></thead><tbody>
       ${rows.map((r, j) => `<tr>
         <td><input type="text" data-path="options.${i}.${key}.${j}.label" value="${esc(r.label)}" aria-label="${kind} ${j + 1} name"></td>
         <td><input type="number" inputmode="decimal" step="any" min="0" data-path="options.${i}.${key}.${j}.amount" data-type="number" value="${esc(r.amount)}" aria-label="${nm(r, j)} amount in dollars"></td>
-        ${withUpfront ? `<td class="c"><input type="checkbox" data-path="options.${i}.${key}.${j}.paidUpfront" data-type="bool" ${r.paidUpfront ? 'checked' : ''} aria-label="${nm(r, j)} is paid before event day"></td>` : ''}
+        ${withUpfront ? `<td class="c"><input type="checkbox" data-path="options.${i}.${key}.${j}.paidUpfront" data-type="bool" ${r.paidUpfront ? 'checked' : ''} aria-label="${nm(r, j)}: ${upfront.toLowerCase().replace('?', '')}"></td>` : ''}
         <td><button class="link" data-action="del-row" data-i="${i}" data-key="${key}" data-j="${j}" aria-label="Remove ${nm(r, j)}">✕</button></td></tr>`).join('')}
       </tbody></table></div><button class="small" data-action="add-row" data-i="${i}" data-key="${key}">+ Add line</button>`;
   }
@@ -183,20 +185,21 @@
     const i = cur(), p = `options.${i}`, o = state.options[i], t = T(o);
     const product = t.survey === 'buy';
     return `${optionTabs('Fill this in for each option.')}
+      ${product ? '<p class="hint">If sellers collect orders and money <b>before</b> you order from the supplier, the items you must pay for is usually 0 (unless the supplier has a minimum). If you must buy stock up front, enter that quantity: you pay for it whether it sells or not.</p>' : ''}
       <div class="fields">
         ${num(p + '.venueQuote.perParticipant', product ? 'Supplier cost per item, including tax and shipping ($)' : `${cap(t.venue)} charge per ${t.one}, including tax and service charges ($)`)}
         ${num(p + '.venueQuote.minimumParticipants', product ? 'Items you must pay for no matter how many sell: the supplier minimum or your pre-order (0 if none)' : `Minimum ${t.many} you must pay for (0 if none)`, { step: 1 })}
         ${num(p + '.venueQuote.flatFee', product ? 'Flat fee from the supplier ($, 0 if none)' : 'Flat fee, rental or buyout ($, 0 if none)')}
         ${num(p + '.venueQuote.minimumSpend', product ? 'Minimum order total ($, 0 if none)' : 'Minimum total spend, such as a food-and-drink minimum ($, 0 if none)')}
-        ${num(p + '.capacity', product ? 'Most items you can get or sell' : `Most ${t.many} the ${t.venue} can take`, { step: 1 })}
+        ${num(p + '.capacity', product ? 'Most items you could realistically get and sell (the planner never counts more than this)' : `Most ${t.many} the ${t.venue} can take`, { step: 1 })}
         ${t.groupName ? num(p + '.groupSize', `${cap(t.groupName)} size (1 if ${t.many} only sign up one at a time)`, { step: 1 }) : ''}
       </div>
       ${t.groupName && Number(o.groupSize) > 1 ? `<div class="checks">${chk(p + '.wholeGroupsOnly', `${cap(t.many)} can only come as full ${t.groupName}s`)}</div>` : ''}
-      <h3 class="sub">Deposit</h3>
-      <div class="fields">${num(p + '.deposit.amount', 'Deposit amount ($)')}</div>
+      <h3 class="sub">${product ? 'Deposit to the supplier' : 'Deposit'}</h3>
+      <div class="fields">${num(p + '.deposit.amount', product ? 'Deposit paid before ordering ($, 0 if none)' : 'Deposit amount ($)')}</div>
       <div class="checks">${chk(p + '.deposit.creditedTowardBill', 'The deposit counts toward the final bill')}${chk(p + '.deposit.refundable', 'The deposit is refundable')}</div>
       <h3 class="sub">Cancellation</h3>
-      <div class="fields">${num(p + '.cancellationOwed', 'Total you would owe if you cancel after the deadline on the quote, including any deposit you would lose ($, blank = not known yet)', { placeholder: 'not known yet', wide: true })}</div>
+      <div class="fields">${num(p + '.cancellationOwed', product ? 'Total you would owe the supplier if you cancel after ordering, including any deposit you would lose ($, 0 if you can cancel for free, blank = not known yet)' : 'Total you would owe if you cancel after the deadline on the quote, including any deposit you would lose ($, blank = not known yet)', { placeholder: 'not known yet', wide: true })}</div>
       <div class="callout ${o.quoteVerified ? 'ok' : ''}">${chk(p + '.quoteVerified', 'I have this quote in writing')}<span>Until this is checked, the result will say “Not enough evidence to decide yet.”</span></div>
       <details class="qs"><summary>Questions to ask the ${t.venue} before signing</summary><ul class="plain">${questionsFor(o).map((q) => `<li>${esc(q)}</li>`).join('')}</ul></details>`;
   }
@@ -239,10 +242,10 @@
           ${num(`${p}.scenarioParticipants.${k}`, t.survey === 'buy' ? 'Items sold' : `Paying ${t.many}`, { step: 1 })}
           ${t.proceeds ? num(`${p}.scenarioProceeds.${k}`, 'Auction and raffle money you would count on ($)') : ''}</div>`).join('')}
       </div>
-      ${t.proceeds ? '<p class="hint">Auction and raffle money is your own figure for each case. Donated items don\'t guarantee bids, so keep the low case low.</p>' : ''}
+      ${t.proceeds ? '<p class="hint">Auction and raffle money is your own figure for each case. It is counted in the low, likely and high totals but <b>not</b> in break-even, because donated items don\'t guarantee bids. Keep the low case low, and don\'t enter the same raffle money again under “Adjust assumptions”.</p>' : ''}
       <details class="qs"><summary>Adjust assumptions (sponsors counted, raffle income, cost cushion)</summary>
         <div class="table-wrap"><table class="edit">
-          <thead><tr><th></th><th>Sponsors counted</th><th>Extra income per person ($)<br><span class="muted">raffle tickets, add-ons, mulligans</span></th><th>Other income ($)</th><th>Cost cushion %<br><span class="muted">not on the venue quote</span></th></tr></thead>
+          <thead><tr><th></th><th>Sponsors counted</th><th>Extra income per ${esc(t.one)} ($)<br><span class="muted">${t.proceeds ? 'drink tickets, games (not auction or raffle money)' : 'raffle tickets, add-ons, mulligans'}</span></th><th>Other income ($)</th><th>Cost cushion %<br><span class="muted">not on the venue quote</span></th></tr></thead>
           <tbody>${SC.map((k) => `<tr><td><b>${esc(ss[k].label)}</b></td><td>${statusBoxes(k)}</td>
             <td><input type="number" inputmode="decimal" step="any" min="0" data-path="scenarioSettings.${k}.extraRevenuePerParticipant" data-type="number" value="${esc(ss[k].extraRevenuePerParticipant)}" aria-label="${esc(ss[k].label)} extra income per person"></td>
             <td><input type="number" inputmode="decimal" step="any" min="0" data-path="scenarioSettings.${k}.otherRevenue" data-type="number" value="${esc(ss[k].otherRevenue)}" aria-label="${esc(ss[k].label)} other income"></td>
@@ -299,21 +302,27 @@
     const fb = String(s.fallbackPrice || '').trim().replace(/^\$/, '');
     const priceQs = opts.map((o, k) => {
       const t = T(o), q = `Q4${letters[k]}. ${o.name}`;
-      if (t.survey === 'buy') return `${q}: at $${Number(o.price) || '[price]'} per item, would you buy?
-   ( ) Yes, about how many?  ( ) 1  ( ) 2  ( ) 3 or more
+      if (t.survey === 'buy') return `${q}: at $${Number(o.price) || '[price]'} per item, would your household buy? (If another adult in your home is also answering, only one of you should count your household's items.)
+   ( ) Yes, 1 item
+   ( ) Yes, 2 items
+   ( ) Yes, 3 or more items
    ( ) Maybe, I'm not sure yet
    ( ) No, that price is more than I would pay
    ( ) No, I'm not interested in this product`;
       const n = Number(o.groupSize) || 1;
       const group = t.groupName && n > 1 ? ` (or $${groupPrice(o)} for a full ${t.groupName} of ${n})` : '';
       const free = t.proceeds && !Number(o.price);
-      const ask = free ? 'admission is free; would you come and take part in the auction or raffle?' : `if it cost $${Number(o.price) || '[price]'} per ${t.one}${group}, would you ${t.survey === 'attend' ? 'buy a ticket' : 'sign up'}?`;
+      if (free) return `${q}: admission is free, and the money is raised through the auction and raffle. Would you come and plan to bid or buy raffle tickets?
+   ( ) Yes, I would come and plan to bid or buy raffle tickets if the date works
+   ( ) Maybe, I might come, or I'm not sure yet
+   ( ) No, probably not`;
+      const ask = `if it cost $${Number(o.price) || '[price]'} per ${t.one}${group}, would you ${t.survey === 'attend' ? 'buy a ticket' : 'sign up'}?`;
       return `${q}: ${ask}
    ( ) Yes, I would ${free ? 'come' : t.survey === 'attend' ? 'buy a ticket' : 'sign up and pay this price'} if the date works
    ( ) Maybe, I'm interested but not sure yet
    ${free ? '( ) No, probably not' : '( ) No, that price is more than I would pay'}
    ( ) No, I wouldn't do this one at any price`;
-    }).join('\n\n') + (fb ? `
+    }).join('\n\n') + (fb && opts.some((o) => !(T(o).proceeds && !Number(o.price))) ? `
 
 Q4${letters[opts.length] || 'x'}. ONLY if you answered "more than I would pay" above: would you take part in a simpler, lower-cost version at about $${fb}?
    ( ) Yes  ( ) Maybe  ( ) No` : '');
@@ -323,8 +332,8 @@ Q4${letters[opts.length] || 'x'}. ONLY if you answered "more than I would pay" a
    ( ) I golf now and then, or I'm a beginner who'd enjoy a casual scramble
    ( ) I don't golf${others.length ? ', but I might take part in one of the other options (skip Q3, then answer Q4 for those)' : ', but I might support another way  -> skip to Q6'}
    ( ) I'm not interested in any of these  -> skip to Q6`;
-    const otherQ2 = onlyProducts ? '' : `Q2. Would you be interested in taking part in a fundraiser like this?
-   ( ) Yes  ( ) Maybe  ( ) No  -> skip to Q6
+    const otherQ2 = onlyProducts ? '' : `Q2. Would you be interested in ${kinds.has('buy') ? 'at least one of the options below' : 'taking part in a fundraiser like this'}?
+   ( ) Yes  ( ) Maybe  ( ) No, none of them  -> skip to Q6
 
 `;
     const q3 = hasGroups ? `Q3. If you took part, how would you most likely do it?
@@ -332,7 +341,7 @@ Q4${letters[opts.length] || 'x'}. ONLY if you answered "more than I would pay" a
    ( ) With one other person
    ( ) With a full group or table, made up of people who are NOT getting this survey
    ( ) With a full group or table, including people who are also getting this survey
-   ( ) Not sure yet
+   ( ) Not sure yet${kinds.has('buy') ? ' / only interested in the product sale' : ''}
 
 ` : '';
     return `DRAFT: review and edit before sending. Anonymous unless the respondent chooses to answer Q8.
@@ -365,7 +374,8 @@ Q8. OPTIONAL: If you answered "Yes" in Q4 and would like early sign-up, ordering
 ---
 Organizer notes (do not send):
 - Named "yes" answers (step 8) = people who answered "Yes" to that option's Q4 AND left their name in Q8.
-- Count people for events and items for product sales (add up the quantities; count "3 or more" as 3).
+- Count people for events and items for product sales: "Yes, 1 item" = 1, "Yes, 2 items" = 2, "Yes, 3 or more" = 3. If two adults from one household both left their name, count that household's items once.
+- Free-admission auction nights: a "Yes" is a guest, not money. Base your low, likely and high auction figures on realistic bidding, not headcount.
 - Count a group or table as its full size only if the respondent chose "people who are NOT getting this survey" AND confirmed it with you directly. Otherwise the same people may be counted twice.
 - "Yes" without Q8 = anonymous "Yes". "Maybe" = "Maybe". Count each person once per option.
 - Edit the option names above into plain language, and delete questions that don't fit, before sending.
@@ -449,13 +459,13 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   function renderComparison(all) {
     const target = Number(state.settings.fundraisingTarget) || 0;
     return `<div class="table-wrap"><table class="res">
-      <thead><tr><th>Option</th><th>Status</th><th>Break-even<br><span class="muted">firm sponsorship</span></th><th>Needed for ${money(target)}</th><th>Feasible capacity</th><th>Conservative net</th><th>Middle net</th><th>Optimistic net</th><th>Upfront cash</th><th>Volunteer hrs</th></tr></thead>
+      <thead><tr><th>Option</th><th>Status</th><th>Break-even<br><span class="muted">firm money only${state.options.some((o) => T(o).proceeds) ? ', no auction bids' : ''}</span></th><th>Needed for ${money(target)}</th><th>Feasible capacity</th><th>Conservative net</th><th>Middle net</th><th>Optimistic net</th><th>Upfront cash</th><th>Volunteer hrs</th></tr></thead>
       <tbody>${state.options.map((o, i) => { const a = all[i]; const be = a.dec.breakEven, tg = a.dec.targetNeeded; return `<tr>
         <td><b>${esc(o.name)}</b></td>
         <td><span class="badge ${statusClass(a.dec.status)}"><i>${statusIcon(a.dec.status)}</i>${esc(E.STATUS_LABELS[a.dec.status])}</span></td>
-        <td>${be.reachableWithinCapacity ? be.participants : '<b class="neg">Not within capacity</b>'}</td>
-        <td>${target ? (tg.reachableWithinCapacity ? tg.participants : '<b class="neg">Exceeds capacity</b>') : '—'}</td>
-        <td>${be.maxFeasible}</td>
+        <td>${be.reachableWithinCapacity ? `${be.participants} ${esc(T(o).many)}` : '<b class="neg">Not within capacity</b>'}</td>
+        <td>${target ? (tg.reachableWithinCapacity ? `${tg.participants} ${esc(T(o).many)}` : '<b class="neg">Exceeds capacity</b>') : '—'}</td>
+        <td>${be.maxFeasible} ${esc(T(o).many)}</td>
         ${SC.map((k) => `<td class="${a.proj[k].net < 0 ? 'neg' : ''}">${money(a.proj[k].net)}</td>`).join('')}
         <td>${money(a.proj.middle.upfront.required)}</td><td>${a.proj.middle.volunteerHours}</td></tr>`; }).join('')}</tbody></table></div>`;
   }
@@ -466,7 +476,9 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     const row = (label, f, cls = '') => `<tr class="${cls}"><th>${label}</th>${SC.map((k) => `<td>${f(P[k], k)}</td>`).join('')}</tr>`;
     const flags = (p) => p.flags.length ? ` <span class="flag">${p.flags.map((f) => f.replace(/_/g, ' ')).join(', ')}</span>` : '';
     const ss = state.scenarioSettings;
-    const marks = SC.map((k) => ({ n: P[k].participants, label: ss[k].label, net: E.project(o, P[k].participants, { ...E.scenarioContext(state, o, 'middle'), statuses: ['collected', 'committed'] }).net }));
+    const midCtx = E.scenarioContext(state, o, 'middle');
+    const firmMarkCtx = { ...midCtx, statuses: ['collected', 'committed'], otherRevenue: Math.max(0, midCtx.otherRevenue - (Number((o.scenarioProceeds || {}).middle) || 0)) };
+    const marks = SC.map((k) => ({ n: P[k].participants, label: ss[k].label, net: E.project(o, P[k].participants, firmMarkCtx).net }));
     const ik = [...new Map(SC.flatMap((k) => P[k].inKind.applied.concat(P[k].inKind.notCounted.filter((n) => n.reason !== 'status_not_counted_in_this_scenario'))).map((x) => [x.id, x])).values()];
     return `<details class="detail" ${state.options.indexOf(o) === 0 ? 'open' : ''}><summary>${esc(o.name)} — scenario detail</summary>
       <div class="table-wrap"><table class="res sc">
@@ -474,7 +486,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <tbody>
           ${row(cap(T(o).many), (p) => `${p.participants}${flags(p)}`)}
           ${row(T(o).survey === 'buy' ? 'Sales' : 'Ticket and registration revenue', (p) => money(p.revenue.registration) + (p.revenue.groups ? ` <span class="muted">${p.revenue.groups} ${esc(T(o).groupName || 'group')}s + ${p.revenue.singles} single</span>` : ''))}
-          ${row(T(o).proceeds ? 'Add-ons, auction and raffle' : 'Add-on revenue', (p) => money(p.revenue.extras + p.revenue.other))}
+          ${row(T(o).proceeds ? 'Add-ons, auction and raffle (your estimates; not in break-even)' : 'Add-on revenue', (p) => money(p.revenue.extras + p.revenue.other))}
           ${row('Sponsorship cash counted', (p) => money(p.revenue.sponsorshipCash))}
           ${row('Total revenue', (p) => money(p.revenue.total), 'sum')}
           ${row(cap(T(o).venue), (p) => money(p.expenses.venue) + (p.expenses.venueMinimumApplied ? ` <span class="flag">minimum applies (billed ${p.expenses.venueBilledParticipants})</span>` : ''))}
@@ -484,7 +496,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
           ${row('Contingency on estimated costs', (p) => money(p.expenses.contingency))}
           ${row('Total expenses', (p) => money(p.expenses.total), 'sum')}
           ${row('<b>Projected net proceeds</b>', (p) => `<b class="${p.net < 0 ? 'neg' : ''}">${money(p.net)}</b>`, 'net')}
-          ${row('Cash needed before the event', (p) => money(p.upfront.required))}
+          ${row(T(o).survey === 'buy' ? 'Cash needed before order money comes in' : 'Cash needed before the event', (p) => money(p.upfront.required))}
           ${row('Cash in hand now', (p) => money(p.upfront.cashInHand))}
           ${row('Upfront cash gap', (p) => `<span class="${p.upfront.gap > 0 ? 'neg' : ''}">${money(p.upfront.gap)}</span>`)}
           ${row('Volunteer hours (not in net)', (p) => p.volunteerHours)}
@@ -501,8 +513,11 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     const t = T(o);
     const firm = P.middle.sponsorshipByStatus.collected + P.middle.sponsorshipByStatus.committed;
     const have = d.paid + d.named;
-    if (!d.breakEven.reachableWithinCapacity) return `Even at full capacity of ${d.breakEven.maxFeasible}, this option loses money on collected and committed sponsorship as currently priced, so it should not go ahead as configured.`;
-    return `With ${money(firm)} in collected and committed sponsorship, we need ${d.breakEven.participants} ${t.survey === 'buy' ? 'items sold' : 'paying ' + t.many} to break even. Right now we have ${have} (paid registrations plus named survey “yes” answers)${d.breakEven.participants > have ? `, a gap of ${d.breakEven.participants - have}` : ', which meets the headcount check only. Named “yes” answers are not paid registrations'}. ${t.survey === 'buy' ? 'If nothing sells' : 'If nobody registers'}, we would be at about ${round(d.worst.netIfNobodyRegisters)}.`;
+    const midProceeds = Number((o.scenarioProceeds || {}).middle) || 0;
+    const auction = t.proceeds && (d.proceedsLow > 0 || midProceeds > 0) ? ` Break-even leaves out auction and raffle money because bids aren't promised; our middle estimate for it is ${round(midProceeds)}, which is included in the middle-case net of ${round(P.middle.net)}.` : '';
+    if (!d.breakEven.reachableWithinCapacity && d.beWithLowProceeds && d.beWithLowProceeds.reachableWithinCapacity) return `Tickets and firm sponsorship alone can't cover costs, even at full capacity of ${d.breakEven.maxFeasible} ${t.many}. This only works if auction or raffle money reaches at least our low estimate of ${round(d.proceedsLow)}, and bids aren't promised.`;
+    if (!d.breakEven.reachableWithinCapacity) return `Even at full capacity of ${d.breakEven.maxFeasible} ${t.many}, this option loses money on collected and committed sponsorship as currently priced, so it should not go ahead as configured.${auction}`;
+    return `With ${money(firm)} in collected and committed sponsorship, we need ${d.breakEven.participants} ${t.survey === 'buy' ? 'items sold' : 'paying ' + t.many} to break even. Right now we have ${have} (${t.survey === 'buy' ? 'paid orders' : 'paid registrations'} plus named survey “yes” answers)${d.breakEven.participants > have ? `, a gap of ${d.breakEven.participants - have}` : `, which meets the count check only. Named “yes” answers are not ${t.survey === 'buy' ? 'paid orders' : 'paid registrations'}`}. ${t.survey === 'buy' ? 'If nothing sells' : 'If nobody registers'}, we would be at about ${round(d.worst.netIfNobodyRegisters)}.${auction}`;
   }
 
   function renderSummary(all) {
@@ -516,22 +531,25 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       lines.push(`At the low number you entered (${P.conservative.participants} ${t.many}), projected net is ${hm(P.conservative.net)}; at the middle ${P.middle.participants}, ${hm(P.middle.net)}.`);
       if (d.worst.contractualFloor > 0) lines.push(`From the minimums and deposit you entered, the venue bill at low turnout is about ${hm(d.worst.contractualFloor)}. That isn't a cancellation fee, and it only applies if those are the terms you actually sign.`);
       if (d.cancel) lines.push(`If you cancel after the quote's deadline: about ${hm(d.cancel.owedToVenue)} to the venue, plus ${hm(d.cancel.alreadySpent)} already spent on items paid in advance.`);
-      if (d.proceedsLow > 0) lines.push(`Break-even leaves out auction and raffle money, because bids aren't promised. Your own low estimate is about ${hm(d.proceedsLow)}, which is counted in the scenarios but not in break-even.`);
+      const midP = Number((o.scenarioProceeds || {}).middle) || 0;
+      if (t.proceeds && (d.proceedsLow > 0 || midP > 0)) lines.push(`Why break-even and middle-case net look different: break-even leaves out auction and raffle money because bids aren't promised. Your scenarios include about ${hm(d.proceedsLow)} (low) and ${hm(midP)} (middle) of it.`);
       if (top) lines.push(`The single assumption that moves the middle case most: “${top.label}” (${top.change >= 0 ? '+' : ''}${money(top.change)}).`);
-      if (P.middle.upfront.gap > 0) lines.push(`You would need ${money(P.middle.upfront.gap)} more cash than you have in hand before the event.`);
+      if (P.middle.upfront.gap > 0) lines.push(`You would need ${money(P.middle.upfront.gap)} more cash than you have in hand before ${t.survey === 'buy' ? 'order money comes in' : 'the event'}.`);
       if (P.middle.sponsorshipByStatus.hoped > 0) lines.push(`${money(P.middle.sponsorshipByStatus.hoped)} of sponsorship is only hoped-for and is excluded from break-even.`);
-      lines.push(`Evidence so far: ${d.paid} paid registrations; ${d.named} named high-intent leads; ${d.definitely} anonymous “definitely”; ${d.responses} total responses. Stated interest is not a registration.`);
+      lines.push(t.survey === 'buy'
+        ? `Evidence so far: ${d.paid} items already paid for; ${d.named} items from named “yes” answers; ${d.definitely} from anonymous “yes”; ${d.responses} survey responses. Survey interest is not a paid order.`
+        : `Evidence so far: ${d.paid} paid sign-ups or tickets; ${d.named} named “yes” answers; ${d.definitely} anonymous “yes”; ${d.responses} survey responses. Survey interest is not a paid sign-up.`);
       const vh = P.middle.volunteerHours;
       const beGap = d.breakEven.reachableWithinCapacity ? Math.max(0, d.breakEven.participants - d.paid - d.named) : 0;
       const perHour = vh ? P.middle.net / vh : null;
       return `<div class="sum"><h4><span class="badge ${statusClass(d.status)}"><i>${statusIcon(d.status)}</i>${esc(E.STATUS_LABELS[d.status])}</span> ${esc(o.name)}</h4>
         <p class="aloud"><b>What to tell the board (30 seconds):</b> ${esc(readAloud(o, d, P, (x) => money(E.roundHeadline(x))))}</p>
         <div class="cards">
-          <div class="card ${beGap > 0 || !d.breakEven.reachableWithinCapacity ? 'bad' : ''}"><span>Break-even vs. evidence</span><b>${d.breakEven.reachableWithinCapacity ? d.breakEven.participants : '—'} needed · ${d.paid + d.named} paid or named</b><em>${esc(t.many)} needed (firm sponsorship) vs. paid + named “yes” answers. Named answers are not money.</em></div>
-          <div class="card"><span>Cash needed before event day</span><b>${hm(P.middle.upfront.required)}</b><em>deposit + bills due before the event; short by ${hm(P.middle.upfront.gap)} vs. cash in hand</em></div>
+          <div class="card ${beGap > 0 || !d.breakEven.reachableWithinCapacity ? 'bad' : ''}"><span>Break-even vs. evidence</span><b>${d.breakEven.reachableWithinCapacity ? d.breakEven.participants : '—'} needed · ${d.paid + d.named} paid or named</b><em>${esc(t.many)} needed on firm money${t.proceeds ? ', not counting auction bids,' : ''} vs. paid + named “yes” answers. Named answers are not money.</em></div>
+          <div class="card"><span>${t.survey === 'buy' ? 'Cash needed up front' : 'Cash needed before event day'}</span><b>${hm(P.middle.upfront.required)}</b><em>deposit + bills due before the event; short by ${hm(P.middle.upfront.gap)} vs. cash in hand</em></div>
           <div class="card"><span>Contract floor</span><b>${hm(d.worst.contractualFloor)}</b><em>the least the ${esc(t.venue)} bills even if ${t.survey === 'buy' ? 'nothing sells' : 'nobody comes'}, from the minimums and deposit you entered</em></div>
           <div class="card ${d.worst.netIfNobodyRegisters < 0 ? 'bad' : ''}"><span>${t.survey === 'buy' ? 'Net if nothing sells' : 'Net if nobody registers'}</span><b>${hm(d.worst.netIfNobodyRegisters)}</b><em>collected sponsor cash minus the contract floor and all one-time costs, including ones paid later</em></div>
-          <div class="card"><span>Middle-case net</span><b>${hm(P.middle.net)}</b><em>at low turnout (${P.conservative.participants}): ${hm(P.conservative.net)}</em></div>
+          <div class="card"><span>Middle-case net</span><b>${hm(P.middle.net)}</b><em>at the low number (${P.conservative.participants}): ${hm(P.conservative.net)}${t.proceeds ? '. Includes your auction and raffle estimate' : ''}</em></div>
           <div class="card"><span>Volunteer hours</span><b>${vh} h</b><em>${perHour == null ? '—' : `≈ ${money(Math.round(perHour))} net per hour (middle)`}</em></div>
         </div>
         <ul class="plain">${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>

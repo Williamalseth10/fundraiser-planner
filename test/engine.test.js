@@ -306,3 +306,14 @@ test('break-even leaves out auction and raffle estimates (bids are not promised)
   assert.equal(d.proceedsLow, 100000);
   assert.ok(d.conservative.net > 100000 - 1000); // the scenario itself still includes the organizer's figure
 });
+
+test('free-admission auction: high risk if the low auction estimate covers costs, not viable if it does not', () => {
+  const o = { ...base(), id: 'free', price: 0, perParticipantCosts: [], venueQuote: { flatFee: 2000, perParticipant: 0, minimumParticipants: 0, minimumSpend: 0 },
+    scenarioParticipants: { conservative: 40 }, scenarioProceeds: { conservative: 3000 } };
+  const st = { settings: {}, sponsorships: [], evidence: {}, scenarioSettings: {} };
+  const d = E.decide(st, o);
+  assert.equal(d.breakEven.reachableWithinCapacity, false); // firm money alone never covers costs
+  assert.equal(d.status, 'high_risk');                       // but the organizer's low auction figure would
+  o.scenarioProceeds.conservative = 1000;                     // 1000 < 2000 + 500 fixed costs
+  assert.equal(E.decide(st, o).status, 'not_viable_as_configured');
+});

@@ -328,9 +328,15 @@
 
     const reasons = [];
     let status;
-    if (!be.reachableWithinCapacity) {
+    // For auction/raffle nights, firm money alone often can't cover costs by design (e.g., free admission).
+    // Then check whether the organizer's own LOW auction figure would cover them: if yes, it's high risk, not "not viable".
+    const beWithLowProceeds = proceedsLow > 0 && !be.reachableWithinCapacity ? participantsNeeded(option, 0, { ...firmCtx, otherRevenue: (Number(firmCtx.otherRevenue) || 0) + proceedsLow }) : null;
+    if (!be.reachableWithinCapacity && beWithLowProceeds && beWithLowProceeds.reachableWithinCapacity) {
+      status = 'high_risk';
+      reasons.push(`Tickets and firm sponsorship can't cover costs even at full capacity (${be.maxFeasible}). It works only if auction or raffle money reaches your low estimate of $${proceedsLow.toFixed(2)}, with ${beWithLowProceeds.participants} paying. Bids aren't promised.`);
+    } else if (!be.reachableWithinCapacity) {
       status = 'not_viable_as_configured';
-      reasons.push(`Even at full capacity (${be.maxFeasible}) the event loses $${Math.abs(be.netAtCapacity).toFixed(2)} with only collected/committed sponsorship.`);
+      reasons.push(`Even at full capacity (${be.maxFeasible}) the event loses $${Math.abs(be.netAtCapacity).toFixed(2)} with only collected/committed sponsorship${proceedsLow > 0 ? ', and your low auction or raffle estimate doesn\'t close the gap' : ''}.`);
     } else if (!option.quoteVerified || (responses === 0 && paid === 0)) {
       status = 'not_enough_evidence';
       reasons.push('Key costs or demand have not been checked against real quotes or real supporter responses.');
@@ -346,7 +352,7 @@
     }
     if (target > 0 && !tg.reachableWithinCapacity) reasons.push(`The $${target.toLocaleString('en-US')} target is not reachable even at full capacity with only collected/committed sponsorship (max ≈ $${Math.round(tg.netAtCapacity).toLocaleString('en-US')}).`);
 
-    return { status, reasons, missing, breakEven: be, targetNeeded: tg, conservative: cons, paid, named, definitely, responses, worst: worstCase(option, state.sponsorships), cancel: cancellationExposure(option, state.sponsorships), proceedsLow };
+    return { status, reasons, missing, breakEven: be, targetNeeded: tg, conservative: cons, paid, named, definitely, responses, worst: worstCase(option, state.sponsorships), cancel: cancellationExposure(option, state.sponsorships), proceedsLow, beWithLowProceeds };
   }
 
   const STATUS_LABELS = {

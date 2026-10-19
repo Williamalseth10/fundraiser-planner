@@ -80,10 +80,11 @@ with sync_playwright() as p:
     assert 'Auction and raffle money' in pg.inner_text('#app'), 'auction option should ask for auction money per scenario'
     pg.goto(URL + '#step-survey'); pg.wait_for_timeout(50)
     gs = pg.text_content('#survey')
-    assert 'per item, would you buy' in gs and 'full table of 8' in gs and 'foursome' not in gs.lower(), 'survey should fit gala and product sale'
+    assert 'per item, would your household buy' in gs and '( ) Yes, 2 items' in gs and 'full table of 8' in gs and 'foursome' not in gs.lower(), 'survey should fit gala and product sale'
+    assert 'No, none of them  -> skip to Q6' in gs, 'mixed plans must not skip the product question on a single No'
     pg.goto(URL + '#results'); pg.wait_for_timeout(50)
     rt = pg.inner_text('#app')
-    assert 'items sold to break even' in rt and 'leaves out auction and raffle money' in rt
+    assert 'items sold to break even' in rt and 'leaves out auction and raffle money' in rt and 'no auction bids' in rt
     # back to the golf example for the remaining checks
     pg.goto(URL + '#home'); pg.click('[data-demo="golf"]'); pg.click('[data-demo="golf"]')
     pg.wait_for_function("location.hash === '#step-event'", timeout=3000)
