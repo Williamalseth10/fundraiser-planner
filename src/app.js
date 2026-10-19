@@ -53,12 +53,14 @@
   // ---------- inputs ----------
   function costRows(i, key, withUpfront) {
     const rows = state.options[i][key];
-    return `<div class="table-wrap"><table class="edit"><thead><tr><th>Label</th><th>Amount $</th>${withUpfront ? '<th>Paid before event?</th><th class="muted">ID (for in-kind)</th>' : ''}<th></th></tr></thead><tbody>
+    const kind = withUpfront ? 'One-time cost' : 'Per-person cost';
+    const nm = (r, j) => esc(r.label || `${kind} ${j + 1}`);
+    return `<div class="table-wrap"><table class="edit"><thead><tr><th>Cost item</th><th>Amount ($)</th>${withUpfront ? '<th>Paid before event day?</th>' : ''}<th><span class="sr-only">Remove</span></th></tr></thead><tbody>
       ${rows.map((r, j) => `<tr>
-        <td><input type="text" data-path="options.${i}.${key}.${j}.label" value="${esc(r.label)}"></td>
-        <td><input type="number" inputmode="decimal" step="any" min="0" data-path="options.${i}.${key}.${j}.amount" data-type="number" value="${esc(r.amount)}"></td>
-        ${withUpfront ? `<td class="c"><input type="checkbox" data-path="options.${i}.${key}.${j}.paidUpfront" data-type="bool" ${r.paidUpfront ? 'checked' : ''}></td><td><code>${esc(r.id)}</code></td>` : ''}
-        <td><button class="link" data-action="del-row" data-i="${i}" data-key="${key}" data-j="${j}" aria-label="Remove">✕</button></td></tr>`).join('')}
+        <td><input type="text" data-path="options.${i}.${key}.${j}.label" value="${esc(r.label)}" aria-label="${kind} ${j + 1} name"></td>
+        <td><input type="number" inputmode="decimal" step="any" min="0" data-path="options.${i}.${key}.${j}.amount" data-type="number" value="${esc(r.amount)}" aria-label="${nm(r, j)} amount in dollars"></td>
+        ${withUpfront ? `<td class="c"><input type="checkbox" data-path="options.${i}.${key}.${j}.paidUpfront" data-type="bool" ${r.paidUpfront ? 'checked' : ''} aria-label="${nm(r, j)} is paid before event day"></td>` : ''}
+        <td><button class="link" data-action="del-row" data-i="${i}" data-key="${key}" data-j="${j}" aria-label="Remove ${nm(r, j)}">✕</button></td></tr>`).join('')}
       </tbody></table></div><button class="small" data-action="add-row" data-i="${i}" data-key="${key}">+ Add line</button>`;
   }
 
@@ -193,20 +195,25 @@
   }
 
   function renderSponsors() {
-    const costIds = [...new Set(state.options.flatMap((o) => o.fixedCosts.map((l) => l.id)))];
-    const optSel = (j, v) => `<select data-path="sponsorships.${j}.optionId"><option value="">All options</option>${state.options.map((o) => `<option value="${esc(o.id)}" ${o.id === v ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>`;
+    // In-kind items point at a one-time cost by its internal id; show people the cost's name and amount instead.
+    const choices = new Map();
+    state.options.forEach((o) => (o.fixedCosts || []).forEach((l) => {
+      const c = choices.get(l.id) || { label: l.label || 'Unnamed cost', where: [] };
+      c.where.push(`${o.name}: ${money(l.amount)}`); choices.set(l.id, c);
+    }));
+    const optSel = (j, v, nm) => `<select data-path="sponsorships.${j}.optionId" aria-label="Which option ${nm} applies to"><option value="">All options</option>${state.options.map((o) => `<option value="${esc(o.id)}" ${o.id === v ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>`;
     return `<div class="table-wrap"><table class="edit">
-      <thead><tr><th>Sponsor / donation</th><th>Value $</th><th>Status</th><th>Type</th><th>In-kind replaces cost ID</th><th>Applies to</th><th></th></tr></thead>
-      <tbody>${state.sponsorships.map((s, j) => `<tr>
-        <td><input type="text" data-path="sponsorships.${j}.label" value="${esc(s.label)}"></td>
-        <td><input type="number" inputmode="decimal" step="any" min="0" data-path="sponsorships.${j}.amount" data-type="number" value="${esc(s.amount)}"></td>
-        <td><select data-path="sponsorships.${j}.status">${[['collected', 'Collected (cash in hand)'], ['committed', 'Committed (in writing)'], ['hoped', 'Hoped-for / asked']].map(([v, l]) => `<option value="${v}" ${s.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
-        <td><select data-path="sponsorships.${j}.type"><option value="cash" ${s.type === 'cash' ? 'selected' : ''}>Cash</option><option value="inKind" ${s.type === 'inKind' ? 'selected' : ''}>In-kind</option></select></td>
-        <td>${s.type === 'inKind' ? `<select data-path="sponsorships.${j}.replacesCostId"><option value="">— replaces no budgeted cost —</option>${costIds.map((id) => `<option value="${esc(id)}" ${s.replacesCostId === id ? 'selected' : ''}>${esc(id)}</option>`).join('')}</select>` : '<span class="muted">n/a</span>'}</td>
-        <td>${optSel(j, s.optionId)}</td>
-        <td><button class="link" data-action="del-sponsor" data-j="${j}" aria-label="Remove">✕</button></td></tr>`).join('')}</tbody>
-    </table></div><button class="small" data-action="add-sponsor">+ Add sponsor / donation</button>
-    <p class="note">In-kind donations are never counted as cash. They only reduce a fixed cost they genuinely replace, up to that cost's amount.</p>`;
+      <thead><tr><th>Sponsor or donation</th><th>Value ($)</th><th>Status</th><th>Type</th><th>Budgeted cost it replaces</th><th>Applies to</th><th><span class="sr-only">Remove</span></th></tr></thead>
+      <tbody>${state.sponsorships.map((s, j) => { const nm = esc(s.label || `Sponsor ${j + 1}`); return `<tr>
+        <td><input type="text" data-path="sponsorships.${j}.label" value="${esc(s.label)}" aria-label="Sponsor ${j + 1} name"></td>
+        <td><input type="number" inputmode="decimal" step="any" min="0" data-path="sponsorships.${j}.amount" data-type="number" value="${esc(s.amount)}" aria-label="${nm} value in dollars"></td>
+        <td><select data-path="sponsorships.${j}.status" aria-label="${nm} status">${[['collected', 'Collected (cash in hand)'], ['committed', 'Committed (in writing)'], ['hoped', 'Hoped-for / asked']].map(([v, l]) => `<option value="${v}" ${s.status === v ? 'selected' : ''}>${l}</option>`).join('')}</select></td>
+        <td><select data-path="sponsorships.${j}.type" aria-label="${nm} type"><option value="cash" ${s.type === 'cash' ? 'selected' : ''}>Cash</option><option value="inKind" ${s.type === 'inKind' ? 'selected' : ''}>In-kind (donated item or service)</option></select></td>
+        <td>${s.type === 'inKind' ? `<select data-path="sponsorships.${j}.replacesCostId" aria-label="Budgeted cost replaced by ${nm}"><option value="">Doesn't replace a budgeted cost</option>${[...choices].map(([id, c]) => `<option value="${esc(id)}" ${s.replacesCostId === id ? 'selected' : ''}>${esc(c.label)} (${esc(c.where.join('; '))})</option>`).join('')}</select>` : '<span class="muted">Cash sponsor</span>'}</td>
+        <td>${optSel(j, s.optionId, nm)}</td>
+        <td><button class="link" data-action="del-sponsor" data-j="${j}" aria-label="Remove ${nm}">✕</button></td></tr>`; }).join('')}</tbody>
+    </table></div><button class="small" data-action="add-sponsor">+ Add sponsor or donation</button>
+    <p class="hint">In-kind donations are never counted as cash. They only reduce a one-time cost from step 5 that they actually replace, up to that cost's amount.</p>`;
   }
 
   let surveyOpen = false;
@@ -215,20 +222,33 @@
   function surveyText() {
     const s = state.snapshot || {};
     const f = (k, ph) => String(s[k] || '').trim() || `[${ph}]`;
-    // One price per option, taken from Step 1, so every "Yes" maps 1:1 to the price the planner evaluates.
+    // One price per option, taken from the prices step, so every "Yes" maps 1:1 to the price the planner evaluates.
     const opts = state.options.slice(0, 3);
+    const hasGolf = opts.some((o) => o.kind !== 'generic');
+    const hasOther = opts.some((o) => o.kind === 'generic');
     const letters = 'abc';
     const fourOf = (o) => (o.foursomePrice == null || o.foursomePrice === '' ? (Number(o.price) * 4 || '[team price]') : (Number(o.foursomePrice) || '[team price]'));
     const fb = String(s.fallbackPrice || '').trim().replace(/^\$/, '');
-    const priceQs = opts.map((o, k) => `Q4${letters[k]}. ${o.name}: if registration were $${Number(o.price) || '[price]'} per player${o.wholeGroupsOnly && Number(o.groupSize) === 4 ? ` (or $${fourOf(o)} for a 4-player team)` : ''}, would you register?
-   ( ) Yes — count me in at this price
-   ( ) Maybe — I'm interested, but it depends on my schedule
-   ( ) No — that price is too high for me
-   ( ) No — I wouldn't play regardless of price`).join('\n\n') + (fb ? `
+    const priceQs = opts.map((o, k) => {
+      const unit = o.kind === 'generic' ? 'person' : 'player';
+      const team = o.wholeGroupsOnly && Number(o.groupSize) === 4 ? ` (or $${fourOf(o)} for a group of 4)` : '';
+      return `Q4${letters[k]}. ${o.name}: if it cost $${Number(o.price) || '[price]'} per ${unit}${team}, would you sign up?
+   ( ) Yes, I would sign up and pay this price if the date works
+   ( ) Maybe, I'm interested but not sure yet
+   ( ) No, that price is more than I would pay
+   ( ) No, I wouldn't do this one at any price`;
+    }).join('\n\n') + (fb ? `
 
-Q4${letters[opts.length] || 'x'}. ONLY if you answered "No — that price is too high" above: would you register for a lower-cost version at about $${fb} per player?
+Q4${letters[opts.length] || 'x'}. ONLY if you answered "more than I would pay" above: would you sign up for a simpler, lower-cost version at about $${fb} per person?
    ( ) Yes  ( ) Maybe  ( ) No` : '');
-    return `DRAFT — review and edit before sending. Anonymous unless the respondent chooses to answer Q8.
+    const golfQ2 = `Q2. Which best describes you?
+   ( ) I golf regularly
+   ( ) I golf now and then, or I'm a beginner who'd enjoy a casual scramble
+   ( ) I don't golf${hasOther ? ', but I might come to the non-golf option (skip Q3, then answer Q4 for that option)' : ', but I might support another way  -> skip to Q6'}
+   ( ) I'm not interested in an event like this  -> skip to Q6`;
+    const otherQ2 = `Q2. Would you be interested in attending an event like this?
+   ( ) Yes  ( ) Maybe  ( ) No  -> skip to Q6`;
+    return `DRAFT: review and edit before sending. Anonymous unless the respondent chooses to answer Q8.
 Adults only: do not send to students or minors, and do not ask about them.
 
 THE EVENT WE ARE CONSIDERING
@@ -237,41 +257,41 @@ When: ${f('dateWindow', 'date window')}
 Where: ${f('locationArea', 'location area')}
 Included: ${f('included', 'what is included')}
 Supports: ${f('beneficiary', 'what the money supports')}
-Answering does not commit you to anything.
+Answering does not commit you to anything. Please answer with what you would really do, not just to be encouraging.
 
 Q1. How are you connected to our program? (choose all)
    Current parent/guardian · Alumni or alumni parent · Extended family · Coach/staff · Local business/community supporter · Other
 
-Q2. Which best describes you?
-   ( ) I play golf regularly and would want to play
-   ( ) I rarely golf / beginner, but would play a casual scramble
-   ( ) I don't want to golf, but might attend a meal/social or support another way  -> skip to Q6
-   ( ) Not interested  -> skip to Q6
+${hasGolf ? golfQ2 : otherQ2}
 
-Q3. If you played, how would you most likely sign up?
-   ( ) Organize a full foursome  ( ) As a pair  ( ) As a single  ( ) Not sure
+Q3. If you signed up, how would you most likely do it?
+   ( ) On my own (put me with others)
+   ( ) With one other person
+   ( ) With a full group of 4, made up of people who are NOT getting this survey
+   ( ) With a full group of 4, including people who are also getting this survey
+   ( ) Not sure yet
 
 ${priceQs}
 
-Q5. Which times could work? (choose all)  [edit to your real options]
-   Friday morning · Friday afternoon · Saturday morning · Sunday afternoon · None of these
+Q5. Which times could work for you? (choose all)  [edit to your real options]
+   Friday morning · Friday afternoon · Saturday morning · Saturday evening · Sunday afternoon · None of these
 
-Q6. What would most get in the way? (choose up to 2)
-   Price · Time commitment · Family/sports schedule conflicts · Work conflict · Not comfortable golfing / no clubs · Prefer to donate directly · Nothing major
+Q6. What would most likely keep you from signing up? (choose up to 2)
+   Price · Time commitment · Family or youth-sports schedule · Work conflict${hasGolf ? ' · Not comfortable golfing / no clubs' : ''} · Prefer to donate directly · Nothing major
 
 Q7. Would you consider supporting in another way? (choose all)
-   A business I'm connected to might sponsor · Donate a raffle/auction item · Volunteer · Make a direct donation · Not right now
+   A business I'm connected to might sponsor · Donate a raffle/auction item · Volunteer at the event · Make a direct donation · Not right now
 
-Q8. OPTIONAL — If you'd like early registration or sponsorship information, leave a name and one contact method.
+Q8. OPTIONAL: If you answered "Yes" in Q4 and would like early registration or sponsorship information, leave a name and one way to reach you.
    This is voluntary and will only be used to follow up about this event.
 
 ---
 Organizer notes (do not send):
-- Named high-intent leads (Step 2) = players from respondents who answered "Yes" to that option's Q4 AND completed Q8.
-  Count a foursome captain as 4 players only if they confirmed they can fill the team; otherwise count 1.
-- "Yes" without Q8 = anonymous "definitely". "Maybe" = "probably". Count each person once per option.
-- Edit the option names and descriptions above into plain language before sending.
-Report raw counts, never percentages extrapolated to a whole school or community. Survey intent usually overstates real sign-ups.`;
+- Named "yes" answers (step 8) = people who answered "Yes" to that option's Q4 AND left their name in Q8.
+- Count each response as 1 person. Count a group of 4 as 4 only if the respondent chose "people who are NOT getting this survey" AND confirmed the group with you directly. Otherwise the same people may be counted twice.
+- "Yes" without Q8 = anonymous "Yes". "Maybe" = "Maybe". Count each person once per option.
+- Edit the option names above into plain language before sending.
+Report raw counts, never percentages applied to a whole school or community. Survey answers usually overstate real sign-ups.`;
   }
 
   function stepSurvey() {
@@ -325,7 +345,8 @@ Report raw counts, never percentages extrapolated to a whole school or community
         ${ticks.map((t) => `<line x1="${L}" x2="${W - R}" y1="${Y(t)}" y2="${Y(t)}" class="${t === 0 ? 'zero' : 'grid'}"/><text x="${L - 6}" y="${Y(t) + 4}" class="ax" text-anchor="end">${money(Math.round(t))}</text>`).join('')}
         ${target ? `<line x1="${L}" x2="${W - R}" y1="${Y(target)}" y2="${Y(target)}" class="target"/><text x="${W - R}" y="${Y(target) - 4}" class="ax" text-anchor="end">target ${money(target)}</text>` : ''}
         <path d="${path}" class="line"/>
-        ${marks.map((m) => `<circle cx="${X(m.n)}" cy="${Y(m.net)}" r="4.5" class="mk"/><text x="${X(m.n)}" y="${Y(m.net) - 9}" class="ax" text-anchor="middle">${esc(m.label)}</text>`).join('')}
+        ${marks.map((m, k) => { const dup = marks.slice(0, k).filter((q) => q.n === m.n).length; const anchor = X(m.n) > W - 70 ? 'end' : X(m.n) < L + 40 ? 'start' : 'middle';
+          return `<circle cx="${X(m.n)}" cy="${Y(m.net)}" r="4.5" class="mk"/><text x="${X(m.n)}" y="${Y(m.net) - 9 - dup * 13}" class="ax" text-anchor="${anchor}">${esc(m.label)}</text>`; }).join('')}
         <text x="${L}" y="${H - 8}" class="ax">0</text><text x="${W - R}" y="${H - 8}" class="ax" text-anchor="end">${xMax} participants</text>
         <line class="xh" x1="0" x2="0" y1="${T}" y2="${H - B}" visibility="hidden"/>
       </svg><div class="tip" hidden></div></figure>`;
@@ -364,7 +385,7 @@ Report raw counts, never percentages extrapolated to a whole school or community
     const row = (label, f, cls = '') => `<tr class="${cls}"><th>${label}</th>${SC.map((k) => `<td>${f(P[k], k)}</td>`).join('')}</tr>`;
     const flags = (p) => p.flags.length ? ` <span class="flag">${p.flags.map((f) => f.replace(/_/g, ' ')).join(', ')}</span>` : '';
     const ss = state.scenarioSettings;
-    const marks = SC.map((k) => ({ n: P[k].participants, label: ss[k].label[0], net: E.project(o, P[k].participants, { ...E.scenarioContext(state, o, 'middle'), statuses: ['collected', 'committed'] }).net }));
+    const marks = SC.map((k) => ({ n: P[k].participants, label: ss[k].label, net: E.project(o, P[k].participants, { ...E.scenarioContext(state, o, 'middle'), statuses: ['collected', 'committed'] }).net }));
     const ik = [...new Map(SC.flatMap((k) => P[k].inKind.applied.concat(P[k].inKind.notCounted.filter((n) => n.reason !== 'status_not_counted_in_this_scenario'))).map((x) => [x.id, x])).values()];
     return `<details class="detail" ${state.options.indexOf(o) === 0 ? 'open' : ''}><summary>${esc(o.name)} — scenario detail</summary>
       <div class="table-wrap"><table class="res sc">
@@ -395,6 +416,13 @@ Report raw counts, never percentages extrapolated to a whole school or community
     </details>`;
   }
 
+  function readAloud(d, P, round) {
+    const firm = P.middle.sponsorshipByStatus.collected + P.middle.sponsorshipByStatus.committed;
+    const have = d.paid + d.named;
+    if (!d.breakEven.reachableWithinCapacity) return `Even at full capacity of ${d.breakEven.maxFeasible}, this option loses money on collected and committed sponsorship as currently priced, so it should not go ahead as configured.`;
+    return `With ${money(firm)} in collected and committed sponsorship, we need ${d.breakEven.participants} paying participants to break even. Right now we have ${have} (paid registrations plus named survey “yes” answers)${d.breakEven.participants > have ? `, a gap of ${d.breakEven.participants - have}` : ', which meets the headcount check only. Named “yes” answers are not paid registrations'}. If nobody registers, we would be at about ${round(d.worst.netIfNobodyRegisters)}.`;
+  }
+
   function renderSummary(all) {
     return state.options.map((o, i) => {
       const a = all[i], d = a.dec, P = a.proj;
@@ -414,12 +442,13 @@ Report raw counts, never percentages extrapolated to a whole school or community
       const beGap = d.breakEven.reachableWithinCapacity ? Math.max(0, d.breakEven.participants - d.paid - d.named) : 0;
       const perHour = vh ? P.middle.net / vh : null;
       return `<div class="sum"><h4><span class="badge ${statusClass(d.status)}"><i>${statusIcon(d.status)}</i>${esc(E.STATUS_LABELS[d.status])}</span> ${esc(o.name)}</h4>
+        <p class="aloud"><b>What to tell the board (30 seconds):</b> ${esc(readAloud(d, P, (x) => money(E.roundHeadline(x))))}</p>
         <div class="cards">
           <div class="card ${beGap > 0 || !d.breakEven.reachableWithinCapacity ? 'bad' : ''}"><span>Break-even vs. evidence</span><b>${d.breakEven.reachableWithinCapacity ? d.breakEven.participants : '—'} needed · ${d.paid + d.named} paid or named</b><em>players needed (firm sponsorship) vs. paid sign-ups + named “yes” answers. Named answers are not money.</em></div>
-          <div class="card"><span>Cash needed before event day</span><b>${hm(P.middle.upfront.required)}</b><em>deposit + costs paid in advance; gap vs. cash in hand ${hm(P.middle.upfront.gap)}</em></div>
-          <div class="card"><span>Course contract floor</span><b>${hm(d.worst.contractualFloor)}</b><em>the least the venue bills even if turnout is low (minimums, non-refundable deposit)</em></div>
-          <div class="card ${d.worst.netIfNobodyRegisters < 0 ? 'bad' : ''}"><span>Net if nobody registers</span><b>${hm(d.worst.netIfNobodyRegisters)}</b><em>= collected sponsorship − contract floor − fixed costs</em></div>
-          <div class="card"><span>Middle-case net</span><b>${hm(P.middle.net)}</b><em>conservative ${hm(P.conservative.net)}</em></div>
+          <div class="card"><span>Cash needed before event day</span><b>${hm(P.middle.upfront.required)}</b><em>deposit + bills due before the event; short by ${hm(P.middle.upfront.gap)} vs. cash in hand</em></div>
+          <div class="card"><span>Course contract floor</span><b>${hm(d.worst.contractualFloor)}</b><em>the least the venue bills even if turnout is zero, from the minimums and deposit you entered</em></div>
+          <div class="card ${d.worst.netIfNobodyRegisters < 0 ? 'bad' : ''}"><span>Net if nobody registers</span><b>${hm(d.worst.netIfNobodyRegisters)}</b><em>collected sponsor cash minus the contract floor and all one-time costs, including ones paid later</em></div>
+          <div class="card"><span>Middle-case net</span><b>${hm(P.middle.net)}</b><em>at low turnout (${P.conservative.participants}): ${hm(P.conservative.net)}</em></div>
           <div class="card"><span>Volunteer hours</span><b>${vh} h</b><em>${perHour == null ? '—' : `≈ ${money(Math.round(perHour))} net per hour (middle)`}</em></div>
         </div>
         <ul class="plain">${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
@@ -450,11 +479,7 @@ Report raw counts, never percentages extrapolated to a whole school or community
     for (const o of state.options) {
       const a = analyse(o), d = a.dec, P = a.proj;
       L.push('', `## ${o.name}`, `**Status: ${E.STATUS_LABELS[d.status]}**`);
-      const firm = P.middle.sponsorshipByStatus.collected + P.middle.sponsorshipByStatus.committed;
-      const have = d.paid + d.named;
-      L.push('', `> **Read-aloud (30 seconds):** ` + (d.breakEven.reachableWithinCapacity
-        ? `With ${money(firm)} in collected and committed sponsorship, we need ${d.breakEven.participants} paying participants to break even. Right now we have ${have} (paid registrations plus named survey leads)${d.breakEven.participants > have ? `, a gap of ${d.breakEven.participants - have}` : ', which meets the headcount check only. Named “yes” answers are not paid registrations'}. If nobody registers, we would be at about ${money(E.roundHeadline(d.worst.netIfNobodyRegisters))}.`
-        : `Even at full capacity of ${d.breakEven.maxFeasible}, this option loses money on firm sponsorship as currently priced, so it should not go ahead as configured.`), '');
+      L.push('', `> **Read-aloud (30 seconds):** ${readAloud(d, P, (x) => money(E.roundHeadline(x)))}`, '');
       d.reasons.forEach((r) => L.push(`- ${r}`));
       L.push(`- Break-even (firm sponsorship only): ${d.breakEven.reachableWithinCapacity ? d.breakEven.participants + ' participants' : 'not reachable within capacity'} of ${d.breakEven.maxFeasible} feasible.`);
       L.push(`- Net: conservative ${hm(P.conservative.net)} (${P.conservative.participants}), middle ${hm(P.middle.net)} (${P.middle.participants}), optimistic ${hm(P.optimistic.net)} (${P.optimistic.participants}).`);
@@ -482,12 +507,13 @@ Report raw counts, never percentages extrapolated to a whole school or community
     { id: 'volunteers', title: 'How much volunteer time will it take?', help: 'A profitable event can still be a bad trade if it burns out your volunteers.', body: stepVolunteers },
   ];
   let view = 'home', stepIdx = 0, savePanel = false;
+  const PER_OPTION_STEPS = new Set(['quote', 'prices', 'costs', 'scenarios']);
 
   function readHash() {
     const h = (location.hash || '').slice(1);
     if (h === 'results') { view = 'results'; return; }
     const k = STEPS.findIndex((st) => 'step-' + st.id === h);
-    if (k >= 0) { view = 'wizard'; stepIdx = k; return; }
+    if (k >= 0) { const back = view === 'wizard' && k === stepIdx - 1; view = 'wizard'; openOption = back ? state.options.length - 1 : 0; stepIdx = k; return; }
     view = 'home';
   }
   function go(hash) { if (location.hash !== '#' + hash) location.hash = hash; else { readHash(); render(); } }
@@ -524,18 +550,22 @@ Report raw counts, never percentages extrapolated to a whole school or community
   function viewWizard() {
     const st = STEPS[stepIdx];
     const pct = Math.round(((stepIdx + 1) / STEPS.length) * 100);
+    const perOpt = PER_OPTION_STEPS.has(st.id) && state.options.length > 1;
+    if (!state.options[openOption]) openOption = 0;
     return `<div class="wiz">
       <nav class="steplist" aria-label="Steps"><ol>${STEPS.map((x, k) => `<li class="${k === stepIdx ? 'on' : ''} ${k < stepIdx ? 'done' : ''}"><a href="#step-${x.id}" ${k === stepIdx ? 'aria-current="step"' : ''}>${esc(x.title)}</a></li>`).join('')}
         <li class="res"><a href="#results">See results</a></li></ol></nav>
       <section class="panel stepcard">
         <div class="progress" role="progressbar" aria-valuemin="1" aria-valuemax="${STEPS.length}" aria-valuenow="${stepIdx + 1}" aria-label="Step ${stepIdx + 1} of ${STEPS.length}"><span style="width:${pct}%"></span></div>
-        <p class="eyebrow">Step ${stepIdx + 1} of ${STEPS.length}</p>
+        <p class="eyebrow">Step ${stepIdx + 1} of ${STEPS.length}${perOpt ? ` · Option ${openOption + 1} of ${state.options.length}` : ''}</p>
         <h2 id="step-title" tabindex="-1">${esc(st.title)}</h2>
         <p class="lede-s">${esc(st.help)}</p>
         <div class="stepbody">${st.body()}</div>
         <div class="stepnav">
-          ${stepIdx > 0 ? `<a class="btn ghost" href="#step-${STEPS[stepIdx - 1].id}">← Back</a>` : '<a class="btn ghost" href="#home">← Home</a>'}
-          ${stepIdx < STEPS.length - 1 ? `<a class="btn" href="#step-${STEPS[stepIdx + 1].id}">Next →</a>` : '<a class="btn" href="#results">See results →</a>'}
+          ${perOpt && openOption > 0 ? `<button class="btn ghost" data-action="opt-step" data-i="${openOption - 1}">← ${esc(state.options[openOption - 1].name || 'Previous option')}</button>`
+            : stepIdx > 0 ? `<a class="btn ghost" href="#step-${STEPS[stepIdx - 1].id}">← Back</a>` : '<a class="btn ghost" href="#home">← Home</a>'}
+          ${perOpt && openOption < state.options.length - 1 ? `<button class="btn" data-action="opt-step" data-i="${openOption + 1}">Next: ${esc(state.options[openOption + 1].name || 'next option')} →</button>`
+            : stepIdx < STEPS.length - 1 ? `<a class="btn" href="#step-${STEPS[stepIdx + 1].id}">Next →</a>` : '<a class="btn" href="#results">See results →</a>'}
         </div>
       </section>
     </div>`;
@@ -571,6 +601,8 @@ Report raw counts, never percentages extrapolated to a whole school or community
     document.getElementById('save-panel').hidden = !savePanel;
     const app = document.getElementById('app');
     app.innerHTML = view === 'wizard' ? viewWizard() : view === 'results' ? viewResults() : viewHome();
+    const sl = app.querySelector('.steplist'), on = sl && sl.querySelector('li.on');
+    if (sl && on && sl.scrollWidth > sl.clientWidth) sl.scrollLeft = on.offsetLeft - 16; // phones: show the current step pill
     if (focusTitle) {
       const h = app.querySelector('h1, #step-title');
       if (h) { if (!h.hasAttribute('tabindex')) h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); }
@@ -585,7 +617,7 @@ Report raw counts, never percentages extrapolated to a whole school or community
       const set = new Set(state.scenarioSettings[k].statuses);
       t.checked ? set.add(t.value) : set.delete(t.value);
       state.scenarioSettings[k].statuses = E.SPONSOR_STATUSES.filter((s) => set.has(s));
-      return render();
+      return renderKeepingFocus();
     }
     if (t.dataset.action === 'import-csv') return importCsv(t.files[0]);
     if (t.dataset.action === 'import-json') return importJson(t.files[0]);
@@ -596,7 +628,29 @@ Report raw counts, never percentages extrapolated to a whole school or community
     if (t.dataset.type === 'pct') v = v === '' ? 0 : Math.min(100, Math.max(0, Number(v))) / 100;
     setPath(state, t.dataset.path, v);
     touched = true;
-    render();
+    renderKeepingFocus();
+  }
+
+  // A change event fires before Tab moves focus. Re-render on the next tick, then put focus back
+  // on whatever control the person had moved to (matched by its data attributes), so keyboard and
+  // screen-reader users aren't thrown back to the top of the page.
+  function focusKey(el) {
+    if (!el || el === document.body || !document.getElementById('app').contains(el)) return null;
+    if (el.dataset.path) return `[data-path="${CSS.escape(el.dataset.path)}"]`;
+    if (el.dataset.scenarioStatus) return `[data-scenario-status="${CSS.escape(el.dataset.scenarioStatus)}"][value="${CSS.escape(el.value)}"]`;
+    if (el.dataset.action) return `[data-action="${CSS.escape(el.dataset.action)}"]` + (el.dataset.i != null ? `[data-i="${CSS.escape(el.dataset.i)}"]` : '') + (el.dataset.j != null ? `[data-j="${CSS.escape(el.dataset.j)}"]` : '') + (el.dataset.key ? `[data-key="${CSS.escape(el.dataset.key)}"]` : '');
+    if (el.id) return '#' + CSS.escape(el.id);
+    return null;
+  }
+  function renderKeepingFocus() {
+    setTimeout(() => {
+      const key = focusKey(document.activeElement);
+      const y = window.scrollY;
+      render();
+      const el = key && document.querySelector(key);
+      if (el) el.focus({ preventScroll: true });
+      window.scrollTo(0, y);
+    }, 0);
   }
 
   function onClick(e) {
@@ -621,6 +675,7 @@ Report raw counts, never percentages extrapolated to a whole school or community
     else if (a === 'copy-survey') return copyText(surveyText(), b);
     else if (a === 'copy-memo') return copyText(boardMemo(), b);
     else if (a === 'nav') return go(b.dataset.to);
+    else if (a === 'opt-step') { openOption = i; render(true); window.scrollTo(0, 0); return; }
     else if (a === 'start-demo') { if (hasSavedPlan() && !armed(b, 'This replaces your saved plan. Click again')) return; state = clone(window.BFDemo.DEMO_STATE); openOption = 0; touched = true; return go('step-event'); }
     else if (a === 'toggle-save') { savePanel = !savePanel; }
     else if (a === 'toggle-exact') { exact = !exact; }
@@ -703,6 +758,13 @@ Report raw counts, never percentages extrapolated to a whole school or community
   }
 
   document.addEventListener('change', onChange);
+  // Enable "Copy survey text" as soon as the last snapshot box is typed in, without waiting for a blur.
+  document.addEventListener('input', (e) => {
+    const t = e.target;
+    if (!t.dataset || !t.dataset.path || !t.dataset.path.startsWith('snapshot.')) return;
+    setPath(state, t.dataset.path, t.value); touched = true; persist();
+    const btn = document.querySelector('[data-action="copy-survey"]'); if (btn) btn.disabled = !snapshotReady();
+  });
   document.addEventListener('click', onClick);
   document.addEventListener('pointermove', onMove);
   window.addEventListener('hashchange', () => { readHash(); render(true); window.scrollTo(0, 0); });

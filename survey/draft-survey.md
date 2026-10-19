@@ -4,7 +4,7 @@
 > **Draft only.** The organizer reviews, edits, and distributes it. The app does not send or publish anything.
 
 ```text
-DRAFT — review and edit before sending. Anonymous unless the respondent chooses to answer Q8.
+DRAFT: review and edit before sending. Anonymous unless the respondent chooses to answer Q8.
 Adults only: do not send to students or minors, and do not ask about them.
 
 THE EVENT WE ARE CONSIDERING
@@ -13,45 +13,49 @@ When: [date window]
 Where: [location area]
 Included: [what is included]
 Supports: [what the money supports]
-Answering does not commit you to anything.
+Answering does not commit you to anything. Please answer with what you would really do, not just to be encouraging.
 
 Q1. How are you connected to our program? (choose all)
    Current parent/guardian · Alumni or alumni parent · Extended family · Coach/staff · Local business/community supporter · Other
 
 Q2. Which best describes you?
-   ( ) I play golf regularly and would want to play
-   ( ) I rarely golf / beginner, but would play a casual scramble
-   ( ) I don't want to golf, but might attend a meal/social or support another way  -> skip to Q6
-   ( ) Not interested  -> skip to Q6
+   ( ) I golf regularly
+   ( ) I golf now and then, or I'm a beginner who'd enjoy a casual scramble
+   ( ) I don't golf, but I might support another way  -> skip to Q6
+   ( ) I'm not interested in an event like this  -> skip to Q6
 
-Q3. If you played, how would you most likely sign up?
-   ( ) Organize a full foursome  ( ) As a pair  ( ) As a single  ( ) Not sure
+Q3. If you signed up, how would you most likely do it?
+   ( ) On my own (put me with others)
+   ( ) With one other person
+   ( ) With a full group of 4, made up of people who are NOT getting this survey
+   ( ) With a full group of 4, including people who are also getting this survey
+   ( ) Not sure yet
 
-Q4a. Option 1: if registration were $[price] per player (or $[team price] for a 4-player team), would you register?
-   ( ) Yes — count me in at this price
-   ( ) Maybe — I'm interested, but it depends on my schedule
-   ( ) No — that price is too high for me
-   ( ) No — I wouldn't play regardless of price
+Q4a. Option 1: if it cost $[price] per player (or $[team price] for a group of 4), would you sign up?
+   ( ) Yes, I would sign up and pay this price if the date works
+   ( ) Maybe, I'm interested but not sure yet
+   ( ) No, that price is more than I would pay
+   ( ) No, I wouldn't do this one at any price
 
-Q5. Which times could work? (choose all)  [edit to your real options]
-   Friday morning · Friday afternoon · Saturday morning · Sunday afternoon · None of these
+Q5. Which times could work for you? (choose all)  [edit to your real options]
+   Friday morning · Friday afternoon · Saturday morning · Saturday evening · Sunday afternoon · None of these
 
-Q6. What would most get in the way? (choose up to 2)
-   Price · Time commitment · Family/sports schedule conflicts · Work conflict · Not comfortable golfing / no clubs · Prefer to donate directly · Nothing major
+Q6. What would most likely keep you from signing up? (choose up to 2)
+   Price · Time commitment · Family or youth-sports schedule · Work conflict · Not comfortable golfing / no clubs · Prefer to donate directly · Nothing major
 
 Q7. Would you consider supporting in another way? (choose all)
-   A business I'm connected to might sponsor · Donate a raffle/auction item · Volunteer · Make a direct donation · Not right now
+   A business I'm connected to might sponsor · Donate a raffle/auction item · Volunteer at the event · Make a direct donation · Not right now
 
-Q8. OPTIONAL — If you'd like early registration or sponsorship information, leave a name and one contact method.
+Q8. OPTIONAL: If you answered "Yes" in Q4 and would like early registration or sponsorship information, leave a name and one way to reach you.
    This is voluntary and will only be used to follow up about this event.
 
 ---
 Organizer notes (do not send):
-- Named high-intent leads (Step 2) = players from respondents who answered "Yes" to that option's Q4 AND completed Q8.
-  Count a foursome captain as 4 players only if they confirmed they can fill the team; otherwise count 1.
-- "Yes" without Q8 = anonymous "definitely". "Maybe" = "probably". Count each person once per option.
-- Edit the option names and descriptions above into plain language before sending.
-Report raw counts, never percentages extrapolated to a whole school or community. Survey intent usually overstates real sign-ups.
+- Named "yes" answers (step 8) = people who answered "Yes" to that option's Q4 AND left their name in Q8.
+- Count each response as 1 person. Count a group of 4 as 4 only if the respondent chose "people who are NOT getting this survey" AND confirmed the group with you directly. Otherwise the same people may be counted twice.
+- "Yes" without Q8 = anonymous "Yes". "Maybe" = "Maybe". Count each person once per option.
+- Edit the option names above into plain language before sending.
+Report raw counts, never percentages applied to a whole school or community. Survey answers usually overstate real sign-ups.
 ```
 
 ## Entering results (aggregate counts only)
@@ -62,8 +66,8 @@ Use `summary-template.csv` (columns `metric,option_id,value`) or type counts int
 |---|---|
 | `survey_responses` | total completed surveys (leave option_id blank) |
 | `paid_registrations` | actual paid sign-ups from your registration records, not the survey |
-| `named_high_intent` | players from respondents who answered Q4 "Yes" for that option **and** completed Q8 (foursome captain = 4 only if team confirmed) |
+| `named_high_intent` | players from respondents who answered Q4 "Yes" for that option **and** completed Q8 |
 | `definitely_at_price` | other (anonymous) Q4 "Yes" for that option |
 | `probably_at_price` | Q4 "Maybe" for that option |
 
-Count each respondent once per option: if they are a named high-intent lead, don't also count them in `definitely_at_price`.
+Count each respondent once per option: if they are a named high-intent lead, don't also count them in `definitely_at_price`. Count a group of 4 as 4 only if the respondent said the others aren't getting the survey and confirmed the group with you.

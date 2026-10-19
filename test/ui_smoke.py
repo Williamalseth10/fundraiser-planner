@@ -18,6 +18,7 @@ def no_hscroll(pg, where):
 def shot(pg, name):
     if shots: pg.screenshot(path=f'{shots}/{name}.png', full_page=True)
 
+PER_OPTION = {'quote', 'prices', 'costs', 'scenarios'}
 STEP_IDS = ['event', 'options', 'quote', 'prices', 'costs', 'sponsors', 'survey', 'evidence', 'scenarios', 'volunteers']
 
 with sync_playwright() as p:
@@ -37,6 +38,14 @@ with sync_playwright() as p:
             assert pg.evaluate("document.activeElement.id") == 'step-title' or k == 0, f'focus not on title at {sid}'
             no_hscroll(pg, f'{label} step {sid}')
             if sid in ('quote', 'scenarios'): shot(pg, f'{label}-step-{sid}')
+            if sid in PER_OPTION:
+                assert 'Option 1 of 3' in pg.text_content('.stepcard .eyebrow'), f'{sid}: should start on option 1'
+                for n in range(2):  # Next walks through the other two options before leaving the step
+                    btn = pg.locator('.stepnav .btn:not(.ghost)')
+                    assert btn.inner_text().startswith('Next: '), f'{sid}: Next should go to the next option'
+                    btn.click(); pg.wait_for_timeout(30)
+                    assert f'Option {n + 2} of 3' in pg.text_content('.stepcard .eyebrow')
+                    assert pg.evaluate('location.hash') == f'#step-{sid}'
             pg.click('.stepnav .btn:not(.ghost)')
         pg.wait_for_function("location.hash === '#results'", timeout=3000); pg.wait_for_timeout(50)
         assert 'Not enough evidence to decide yet' in pg.inner_text('#app')
@@ -49,7 +58,19 @@ with sync_playwright() as p:
     # survey uses one price per option from the prices step
     pg.goto(URL + '#step-survey')
     survey = pg.inner_text('#survey')
-    assert 'Q4a.' in survey and '$125 per player' in survey and '$460 for a 4-player team' in survey, 'single-price survey question missing'
+    assert 'Q4a.' in survey and '$125 per player' in survey and '$460 for a group of 4' in survey, 'single-price survey question missing'
+    assert 'skip Q3, then answer Q4 for that option' in survey, 'non-golfers must not skip the non-golf price question'
+    # keyboard: editing a field and pressing Tab keeps focus on the next field after the page redraws
+    pg.goto(URL + '#step-quote')
+    pg.fill('input[data-path="options.0.venueQuote.perParticipant"]', '57')
+    pg.press('input[data-path="options.0.venueQuote.perParticipant"]', 'Tab'); pg.wait_for_timeout(80)
+    assert pg.evaluate("document.activeElement.dataset.path") == 'options.0.venueQuote.minimumParticipants', 'focus lost after edit'
+    # in-kind dropdown shows cost names, not ids
+    pg.goto(URL + '#step-sponsors')
+    assert 'Signage & printing' in pg.inner_text('select[data-path="sponsorships.3.replacesCostId"]')
+    # read-aloud box is on the results page
+    pg.goto(URL + '#results')
+    assert 'What to tell the board' in pg.inner_text('#app')
     # editing recomputes: shotgun price below cost -> not viable
     pg.goto(URL + '#step-prices'); pg.click('.tab >> nth=1')
     pg.fill('input[data-path="options.1.price"]', '60'); pg.press('input[data-path="options.1.price"]', 'Tab')
