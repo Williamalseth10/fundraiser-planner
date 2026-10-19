@@ -257,6 +257,20 @@
     return { netIfNobodyRegisters: r.net, contractualFloor: d(c(r.expenses.venue) + c(r.expenses.separateDepositFee)) };
   }
 
+  /**
+   * Cancellation exposure, only when the organizer has copied the amount off the quote.
+   * owedToVenue = what the venue says you owe after its cancellation deadline (organizer includes any forfeited deposit).
+   * alreadySpent = fixed costs marked "paid before the event" (after collected in-kind), which are usually not recoverable.
+   * Sponsorship is not netted: sponsors may expect refunds if the event is canceled.
+   */
+  function cancellationExposure(option, sponsorships) {
+    if (option.cancellationOwed == null || option.cancellationOwed === '') return null;
+    const ik = applyInKind(option, sponsorships, ['collected']);
+    const spent = ik.lines.filter((l) => l.paidUpfront).reduce((s, l) => s + (l.cents - l.reducedBy), 0);
+    const owed = c(option.cancellationOwed);
+    return { owedToVenue: d(owed), alreadySpent: d(spent), total: d(owed + spent) };
+  }
+
   /** Round a headline figure to avoid false precision (exact values stay in the detail table). */
   function roundHeadline(x) {
     const n = Number(x) || 0;
@@ -300,6 +314,7 @@
     if (!option.costsVerified) missing.push('Other cost lines (food, prizes, carts, insurance, printing) are estimates, not quotes.');
     if (responses === 0) missing.push('No survey responses entered yet.');
     if (paid === 0) missing.push('No paid registrations or deposits from participants yet.');
+    if (option.cancellationOwed == null || option.cancellationOwed === '') missing.push('What you would owe if you cancel after the deadline on the quote has not been entered.');
     if (state.volunteerHoursAvailable == null || state.volunteerHoursAvailable === '') missing.push('Volunteer hours actually available are unknown.');
     else if (nonNeg(option.volunteerHours) > nonNeg(state.volunteerHoursAvailable)) missing.push(`Estimated volunteer need (${nonNeg(option.volunteerHours)} h) exceeds hours available (${nonNeg(state.volunteerHoursAvailable)} h).`);
 
@@ -319,11 +334,11 @@
       reasons.push(`The conservative scenario loses $${Math.abs(cons.net).toFixed(2)}.`);
     } else {
       status = 'supported_by_current_evidence';
-      reasons.push(`Break-even (${be.participants}) is at or below paid registrations + named high-intent leads (${paid + named}), and the conservative scenario nets $${cons.net.toFixed(2)}.`);
+      reasons.push(`The break-even headcount (${be.participants}) is at or below paid registrations plus named “yes” answers (${paid + named}). Named answers are not revenue. Using the conservative turnout you entered, that scenario nets $${cons.net.toFixed(2)}. This is not a prediction.`);
     }
     if (target > 0 && !tg.reachableWithinCapacity) reasons.push(`The $${target.toLocaleString('en-US')} target is not reachable even at full capacity with only collected/committed sponsorship (max ≈ $${Math.round(tg.netAtCapacity).toLocaleString('en-US')}).`);
 
-    return { status, reasons, missing, breakEven: be, targetNeeded: tg, conservative: cons, paid, named, definitely, responses, worst: worstCase(option, state.sponsorships) };
+    return { status, reasons, missing, breakEven: be, targetNeeded: tg, conservative: cons, paid, named, definitely, responses, worst: worstCase(option, state.sponsorships), cancel: cancellationExposure(option, state.sponsorships) };
   }
 
   const STATUS_LABELS = {
@@ -336,7 +351,7 @@
   const api = {
     SPONSOR_STATUSES, STATUS_LABELS,
     participantStep, maxFeasible, feasibleCounts, normalizeParticipants,
-    registrationCents, worstCase, roundHeadline,
+    registrationCents, worstCase, cancellationExposure, roundHeadline,
     project, participantsNeeded, netCurve, sensitivity, scenarioContext, decide,
   };
 

@@ -63,7 +63,7 @@
   }
 
   const COURSE_QUESTIONS = [
-    'What is the per-player rate, and exactly what does it include (cart, range balls, food, tax, gratuity/service charge)?',
+    'What is the per-player rate, and exactly what does it include (cart, range balls, food)? Is sales tax included or added on top? Is there a service charge or gratuity?',
     'Is there a minimum number of paid players, or a minimum total spend? Is that minimum binding if we fall short?',
     'For a shotgun start: what is the minimum, the buyout fee, and how many players fit (holes × group size)?',
     'For regular tee times: how many consecutive tee times can we hold, and when must unfilled times be released?',
@@ -73,6 +73,13 @@
     'Are food and beverage minimums separate from golf fees?',
     'Can we bring our own prizes, sponsors\' signage, and raffle? Any fees or restrictions?',
     'Does the course require event insurance or a certificate of insurance from us?',
+    'Rain or weather: who decides the course is unplayable, and is there a rain date or a credit instead of a refund?',
+  ];
+  const SIGNING_QUESTIONS = [
+    'Who is allowed to sign the contract and hold the money: the club itself, or the school or district (often through the athletic director)?',
+    'Does the school or district need to approve this fundraiser, and does it require insurance naming the district?',
+    'If your plan counts on raffle income: has the club confirmed it is allowed to run a raffle of that size under state rules?',
+    'Is every number in this plan from a written quote or a real record, not a guess?',
   ];
 
   function anchors(o) {
@@ -114,7 +121,7 @@
     const golf = o.kind !== 'generic';
     return `${optionTabs('Fill this in for each option.')}
       <div class="fields">
-        ${num(p + '.venueQuote.perParticipant', golf ? 'Course charge per player ($)' : 'Venue charge per person ($)')}
+        ${num(p + '.venueQuote.perParticipant', golf ? 'Course charge per player, including tax and service charges ($)' : 'Venue charge per person, including tax and service charges ($)')}
         ${num(p + '.venueQuote.minimumParticipants', golf ? 'Minimum players you must pay for (0 if none)' : 'Minimum people you must pay for (0 if none)', { step: 1 })}
         ${num(p + '.venueQuote.flatFee', 'Flat fee or buyout ($, 0 if none)')}
         ${num(p + '.venueQuote.minimumSpend', 'Minimum total spend ($, 0 if none)')}
@@ -125,6 +132,8 @@
       <h3 class="sub">Deposit</h3>
       <div class="fields">${num(p + '.deposit.amount', 'Deposit amount ($)')}</div>
       <div class="checks">${chk(p + '.deposit.creditedTowardBill', 'The deposit counts toward the final bill')}${chk(p + '.deposit.refundable', 'The deposit is refundable')}</div>
+      <h3 class="sub">Cancellation</h3>
+      <div class="fields">${num(p + '.cancellationOwed', 'Total you would owe if you cancel after the deadline on the quote, including any deposit you would lose ($, blank = not known yet)', { placeholder: 'not known yet', wide: true })}</div>
       <div class="callout ${o.quoteVerified ? 'ok' : ''}">${chk(p + '.quoteVerified', 'I have this quote in writing')}<span>Until this is checked, the result will say “Not enough evidence to decide yet.”</span></div>
       <details class="qs"><summary>Questions to ask the ${golf ? 'course' : 'venue'} before signing</summary><ul class="plain">${COURSE_QUESTIONS.map((q) => `<li>${esc(q)}</li>`).join('')}</ul></details>`;
   }
@@ -395,7 +404,8 @@ Report raw counts, never percentages extrapolated to a whole school or community
       if (d.breakEven.reachableWithinCapacity && d.breakEven.participants === 0) lines.push('Collected and committed sponsorship alone would cover costs even with zero participants — confirm sponsors still pay if the event is small or canceled.');
       else if (d.breakEven.reachableWithinCapacity) lines.push(`With only collected and committed sponsorship, you need ${d.breakEven.participants} paying participants to cover costs (feasible capacity ${d.breakEven.maxFeasible}).`);
       lines.push(`If attendance comes in at the conservative ${P.conservative.participants}, projected net is ${hm(P.conservative.net)}; at the middle ${P.middle.participants}, ${hm(P.middle.net)}.`);
-      if (d.worst.contractualFloor > 0) lines.push(`The venue contract alone commits you to about ${hm(d.worst.contractualFloor)} even if attendance collapses.`);
+      if (d.worst.contractualFloor > 0) lines.push(`From the minimums and deposit you entered, the venue bill at low turnout is about ${hm(d.worst.contractualFloor)}. That isn't a cancellation fee, and it only applies if those are the terms you actually sign.`);
+      if (d.cancel) lines.push(`If you cancel after the quote's deadline: about ${hm(d.cancel.owedToVenue)} to the venue, plus ${hm(d.cancel.alreadySpent)} already spent on items paid in advance.`);
       if (top) lines.push(`The single assumption that moves the middle case most: “${top.label}” (${top.change >= 0 ? '+' : ''}${money(top.change)}).`);
       if (P.middle.upfront.gap > 0) lines.push(`You would need ${money(P.middle.upfront.gap)} more cash than you have in hand before the event.`);
       if (P.middle.sponsorshipByStatus.hoped > 0) lines.push(`${money(P.middle.sponsorshipByStatus.hoped)} of sponsorship is only hoped-for and is excluded from break-even.`);
@@ -405,7 +415,7 @@ Report raw counts, never percentages extrapolated to a whole school or community
       const perHour = vh ? P.middle.net / vh : null;
       return `<div class="sum"><h4><span class="badge ${statusClass(d.status)}"><i>${statusIcon(d.status)}</i>${esc(E.STATUS_LABELS[d.status])}</span> ${esc(o.name)}</h4>
         <div class="cards">
-          <div class="card ${beGap > 0 || !d.breakEven.reachableWithinCapacity ? 'bad' : ''}"><span>Break-even vs. evidence</span><b>${d.breakEven.reachableWithinCapacity ? d.breakEven.participants : '—'} needed · ${d.paid + d.named} in hand</b><em>players needed (firm sponsorship) vs. paid + named high-intent</em></div>
+          <div class="card ${beGap > 0 || !d.breakEven.reachableWithinCapacity ? 'bad' : ''}"><span>Break-even vs. evidence</span><b>${d.breakEven.reachableWithinCapacity ? d.breakEven.participants : '—'} needed · ${d.paid + d.named} paid or named</b><em>players needed (firm sponsorship) vs. paid sign-ups + named “yes” answers. Named answers are not money.</em></div>
           <div class="card"><span>Cash needed before event day</span><b>${hm(P.middle.upfront.required)}</b><em>deposit + costs paid in advance; gap vs. cash in hand ${hm(P.middle.upfront.gap)}</em></div>
           <div class="card"><span>Course contract floor</span><b>${hm(d.worst.contractualFloor)}</b><em>the least the venue bills even if turnout is low (minimums, non-refundable deposit)</em></div>
           <div class="card ${d.worst.netIfNobodyRegisters < 0 ? 'bad' : ''}"><span>Net if nobody registers</span><b>${hm(d.worst.netIfNobodyRegisters)}</b><em>= collected sponsorship − contract floor − fixed costs</em></div>
@@ -443,7 +453,7 @@ Report raw counts, never percentages extrapolated to a whole school or community
       const firm = P.middle.sponsorshipByStatus.collected + P.middle.sponsorshipByStatus.committed;
       const have = d.paid + d.named;
       L.push('', `> **Read-aloud (30 seconds):** ` + (d.breakEven.reachableWithinCapacity
-        ? `With ${money(firm)} in collected and committed sponsorship, we need ${d.breakEven.participants} paying participants to break even. Right now we have ${have} (paid registrations plus named survey leads)${d.breakEven.participants > have ? `, a gap of ${d.breakEven.participants - have}` : ', which covers break-even'}. If nobody registers, we would be at about ${money(E.roundHeadline(d.worst.netIfNobodyRegisters))}.`
+        ? `With ${money(firm)} in collected and committed sponsorship, we need ${d.breakEven.participants} paying participants to break even. Right now we have ${have} (paid registrations plus named survey leads)${d.breakEven.participants > have ? `, a gap of ${d.breakEven.participants - have}` : ', which meets the headcount check only. Named “yes” answers are not paid registrations'}. If nobody registers, we would be at about ${money(E.roundHeadline(d.worst.netIfNobodyRegisters))}.`
         : `Even at full capacity of ${d.breakEven.maxFeasible}, this option loses money on firm sponsorship as currently priced, so it should not go ahead as configured.`), '');
       d.reasons.forEach((r) => L.push(`- ${r}`));
       L.push(`- Break-even (firm sponsorship only): ${d.breakEven.reachableWithinCapacity ? d.breakEven.participants + ' participants' : 'not reachable within capacity'} of ${d.breakEven.maxFeasible} feasible.`);
@@ -451,7 +461,9 @@ Report raw counts, never percentages extrapolated to a whole school or community
       L.push(`- Cash needed before the event: ${hm(P.middle.upfront.required)}. Worst case if nobody registers: ${hm(d.worst.netIfNobodyRegisters)}. Volunteer hours: ${P.middle.volunteerHours}.`);
       L.push(`- Evidence: ${d.paid} paid, ${d.named} named high-intent, ${d.definitely} anonymous "definitely", ${d.responses} responses.`);
       if (d.missing.length) { L.push('- Must verify before signing:'); d.missing.forEach((m) => L.push(`  - ${m}`)); }
+      if (d.cancel) L.push(`- If canceled after the quote's deadline: about ${money(E.roundHeadline(d.cancel.owedToVenue))} to the venue plus ${money(E.roundHeadline(d.cancel.alreadySpent))} already spent.`);
     }
+    L.push('', '## Before anyone signs'); SIGNING_QUESTIONS.forEach((q) => L.push(`- [ ] ${q}`));
     L.push('', '_Planning estimates only. No guarantee of results; no tax or legal determinations._');
     return L.join('\n');
   }
@@ -464,7 +476,7 @@ Report raw counts, never percentages extrapolated to a whole school or community
     { id: 'prices', title: 'What will you charge?', help: 'Pick the price you would actually put on the sign-up form.', body: stepPrices },
     { id: 'costs', title: 'What else will it cost?', help: 'Anything not already in the venue quote.', body: stepCosts },
     { id: 'sponsors', title: 'Who is sponsoring?', help: 'Only money that is collected or promised in writing counts toward break-even. Hoped-for sponsors are shown, but never relied on.', body: () => renderSponsors() },
-    { id: 'survey', title: 'Ask your supporters', help: 'A short anonymous survey tells you who would actually play, in which format, at your price.', body: stepSurvey },
+    { id: 'survey', title: 'Ask your supporters', help: 'A short survey asks adults whether they would play, in which format, at your price. A “yes” is interest, not a registration. It stays anonymous unless someone chooses to leave a name.', body: stepSurvey },
     { id: 'evidence', title: 'What did supporters say?', help: 'Type in the totals from your survey and any paid sign-ups so far.', body: stepEvidence },
     { id: 'scenarios', title: 'Plan for low, likely and high turnout', help: 'These are your numbers, not predictions. The survey counts are shown beside them so you can stay honest.', body: stepScenarios },
     { id: 'volunteers', title: 'How much volunteer time will it take?', help: 'A profitable event can still be a bad trade if it burns out your volunteers.', body: stepVolunteers },
@@ -483,12 +495,12 @@ Report raw counts, never percentages extrapolated to a whole school or community
   function viewHome() {
     const hasSaved = hasSavedPlan();
     return `<section class="hero">
-        <p class="eyebrow">For booster clubs, PTAs and other 501(c)(3)s</p>
-        <h1>Know whether your fundraiser will pay off <em>before</em> you sign the contract.</h1>
+        <p class="eyebrow">For booster clubs, PTAs and other small volunteer groups</p>
+        <h1>See whether your numbers work <em>before</em> you sign the contract.</h1>
         <p class="lede">Golf outings, galas and auctions can lock you into big minimums. This planner puts your real quotes next to real answers from your supporters, so the board sees the risk in plain numbers.</p>
         <div class="cta">
           ${hasSaved ? `<button class="btn" data-action="nav" data-to="step-event">Continue my plan</button>` : ''}
-          <button class="btn ${hasSaved ? 'ghost' : ''}" data-action="start-demo">Try the golf example</button>
+          <button class="btn ${hasSaved ? 'ghost' : ''}" data-action="start-demo">Try the golf example (made-up numbers)</button>
           <button class="btn ghost" data-action="start-blank">Start a new plan</button>
         </div>
         <p class="hint">Free. Nothing to install. Your plan stays in your own browser.</p>
@@ -501,11 +513,11 @@ Report raw counts, never percentages extrapolated to a whole school or community
       <section class="honest">
         <h2>What it won't do</h2>
         <ul class="plain">
-          <li>Guess who will come. Attendance comes from your supporters' answers and paid sign-ups, never from assumptions about people.</li>
-          <li>Count “interested” as “registered”. Only paid sign-ups and named “yes” answers count toward break-even.</li>
+          <li>Guess who will come. You type the low, likely and high turnout yourself. Survey answers sit beside those numbers and are never turned into a forecast.</li>
+          <li>Treat a survey “yes” as money. Break-even is a headcount worked out from your prices and costs. Paid sign-ups and named “yes” answers are only compared with that headcount.</li>
           <li>Give tax or legal advice, or promise results.</li>
         </ul>
-        <p>Until there's a written quote and real supporter answers, it will say <b>“Not enough evidence to decide yet.”</b> That's often the right answer.</p>
+        <p>Without a written quote and some real evidence of demand (paid sign-ups or survey answers), it says <b>“Not enough evidence to decide yet.”</b> That's often the right answer. Even its strongest result means only that your numbers hold up so far. It never means the event will make money.</p>
       </section>`;
   }
 
@@ -546,6 +558,8 @@ Report raw counts, never percentages extrapolated to a whole school or community
       </header>
       <section class="panel">${renderSummary(all)}</section>
       ${state.options.length > 1 ? `<section class="panel"><h2>Side by side</h2>${renderComparison(all)}</section>` : ''}
+      <section class="panel"><h2>Before anyone signs</h2><p class="hint">These can change the decision but can't be calculated. Get answers in writing.</p><ul class="plain miss">${SIGNING_QUESTIONS.map((q) => `<li>${esc(q)}</li>`).join('')}</ul>
+        <details class="qs"><summary>Questions to ask the course or venue</summary><ul class="plain">${COURSE_QUESTIONS.map((q) => `<li>${esc(q)}</li>`).join('')}</ul></details></section>
       <section class="panel"><h2>Detailed numbers</h2><p class="hint">Every line of the math for each scenario, a chart of profit at each headcount, and which assumption matters most.</p>${state.options.map((o, i) => renderDetail(o, all[i])).join('')}</section>
     </div>`;
   }

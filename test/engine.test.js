@@ -254,3 +254,23 @@ test('headline rounding avoids false precision', () => {
   assert.equal(E.roundHeadline(1234), 1250);
   assert.equal(E.roundHeadline(-777), -800);
 });
+
+test('cancellation exposure: only when entered; venue amount plus costs already paid in advance', () => {
+  const o = base();
+  assert.equal(E.cancellationExposure(o, []), null);
+  o.cancellationOwed = 1500;
+  const x = E.cancellationExposure(o, []);
+  assert.equal(x.owedToVenue, 1500);
+  assert.equal(x.alreadySpent, 400); // prizes paid upfront; printing is not
+  assert.equal(x.total, 1900);
+  const withInKind = E.cancellationExposure(o, [{ id: 'k', amount: 400, status: 'collected', type: 'inKind', replacesCostId: 'prizes' }]);
+  assert.equal(withInKind.alreadySpent, 0);
+});
+
+test('decision lists missing cancellation terms until entered', () => {
+  const o = { ...base(), scenarioParticipants: { conservative: 24 } };
+  const st = { settings: {}, sponsorships: [], evidence: {} };
+  assert.ok(E.decide(st, o).missing.some((m) => /owe if you cancel/.test(m)));
+  o.cancellationOwed = 0;
+  assert.ok(!E.decide(st, o).missing.some((m) => /owe if you cancel/.test(m)));
+});

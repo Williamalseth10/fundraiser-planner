@@ -31,7 +31,7 @@
           { id: 'prizes', label: 'Prizes / trophies', amount: 400, paidUpfront: true },
           { id: 'signage', label: 'Signage & printing', amount: 200, paidUpfront: true },
         ],
-        volunteerHours: 40, quoteVerified: false, costsVerified: false,
+        volunteerHours: 40, cancellationOwed: null, quoteVerified: false, costsVerified: false,
         scenarioParticipants: { conservative: 24, middle: 36, optimistic: 48 },
       },
       {
@@ -47,7 +47,7 @@
           { id: 'prizes', label: 'Prizes / trophies', amount: 800, paidUpfront: true },
           { id: 'signage', label: 'Hole signs & printing', amount: 450, paidUpfront: true },
         ],
-        volunteerHours: 90, quoteVerified: false, costsVerified: false,
+        volunteerHours: 90, cancellationOwed: 2000, quoteVerified: false, costsVerified: false,
         scenarioParticipants: { conservative: 72, middle: 104, optimistic: 136 },
       },
       {

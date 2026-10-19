@@ -43,6 +43,13 @@ Proceed if the answers to 1 and 3 are yes and the decision is still open.
 - **Rethink** if 0 organizers have one. **Ambiguous** if 1: run 2 more sessions.
 - Grok suggested also stopping if organizers "would not revisit" the tool. Since the event happens once a year, a low revisit rate is expected and isn't a stop signal by itself.
 
+## Counting rules (added from Grok's review)
+- A session counts only if the before/after record was filled in **before** they saw results, the quote was **theirs**, and the facilitator supplied **no numbers**.
+- **Continue** only if at least 2 of 3 sessions produce a decision change and at least one is something they'll do **before signing**. If all three sessions are with the same friendly club, run one with a club that doesn't know you.
+- **Stop or rethink** if no session changes a next step, if they can't finish the quote step without help, or if anyone leaves believing "supported" means the event will make money.
+- If the only surprises are sales tax on the course bill, the cancellation date, or "the AD has to approve this," that supports the checklist, not a bigger product.
+- Ask whether they already use GolfFund, Kismet or a spreadsheet, and what this showed them that those didn't.
+
 ## Observation sheet (one row per issue)
 | Step / field | What happened | Severity (blocked / confused / minor) | Their words |
 |---|---|---|---|
