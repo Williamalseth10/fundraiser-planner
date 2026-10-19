@@ -9,6 +9,8 @@
 Working out profit from a known headcount is easy. The hard part comes before signing: who in *this* supporter base would actually play, in which format, at what price, how many paying participants are realistic, whether sponsorship makes the event viable, and whether the return justifies the cash risk and the volunteer hours. Course contracts (player minimums, non-refundable deposits) can lock in losses before any of that is known.
 
 ## Product
+**Scope (updated 2026-10-19):** universal for small fundraisers. Event types: golf (tee times or shotgun), other sign-up events (runs, tournaments), ticketed events (dinners, galas, trivia), auction or raffle nights, and product sales. Golf remains the first real pilot.
+
 A **pre-event decision assistant**, not an event-management platform. It answers three questions: is this worth committing to, under which option, and what has to be verified first? "Not enough evidence to decide yet" is a valid answer, and it is the default answer until real quotes and real demand evidence are entered.
 
 ## MVP (built in this first version)

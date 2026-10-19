@@ -26,10 +26,10 @@ with sync_playwright() as p:
     for w, label in [(1280, 'desktop'), (375, 'mobile')]:
         pg = b.new_context(viewport={'width': w, 'height': 900}).new_page(); watch(pg)
         pg.goto(URL)
-        assert pg.is_visible('text=Try the golf example'), 'home page CTA missing'
+        assert pg.is_visible('text=Try a golf example'), 'home page CTA missing'
         no_hscroll(pg, f'{label} home'); shot(pg, f'{label}-home')
         assert not pg.is_visible('#demo-banner'), 'no example banner on the home page'
-        pg.click('text=Try the golf example')
+        pg.click('text=Try a golf example')
         pg.wait_for_function("location.hash === '#step-event'", timeout=3000)
         assert pg.is_visible('#demo-banner'), 'example banner must show in the planner'
         for k, sid in enumerate(STEP_IDS):
@@ -54,12 +54,12 @@ with sync_playwright() as p:
         pg.close()
 
     pg = b.new_context(viewport={'width': 1280, 'height': 900}).new_page(); watch(pg)
-    pg.goto(URL); pg.click('text=Try the golf example')
+    pg.goto(URL); pg.click('text=Try a golf example')
     # survey uses one price per option from the prices step
     pg.goto(URL + '#step-survey')
     survey = pg.inner_text('#survey')
-    assert 'Q4a.' in survey and '$125 per player' in survey and '$460 for a group of 4' in survey, 'single-price survey question missing'
-    assert 'skip Q3, then answer Q4 for that option' in survey, 'non-golfers must not skip the non-golf price question'
+    assert 'Q4a.' in survey and '$125 per player' in survey and '$460 for a full foursome of 4' in survey, 'single-price survey question missing'
+    assert 'skip Q3, then answer Q4 for those' in survey, 'non-golfers must not skip the non-golf price question'
     # keyboard: editing a field and pressing Tab keeps focus on the next field after the page redraws
     pg.goto(URL + '#step-quote')
     pg.fill('input[data-path="options.0.venueQuote.perParticipant"]', '57')
@@ -71,10 +71,26 @@ with sync_playwright() as p:
     # read-aloud box is on the results page
     pg.goto(URL + '#results')
     assert 'What to tell the board' in pg.inner_text('#app')
+    # second example: gala with auction vs. product sale uses each type's own words
+    pg.goto(URL + '#home'); pg.click('[data-demo="gala"]'); pg.click('[data-demo="gala"]')
+    pg.wait_for_function("location.hash === '#step-event'", timeout=3000)
+    pg.goto(URL + '#step-quote'); pg.click('.tab >> nth=1'); pg.wait_for_timeout(50)
+    assert 'Supplier cost per item' in pg.inner_text('#app'), 'product sale should use supplier wording'
+    pg.goto(URL + '#step-scenarios'); pg.wait_for_timeout(50)
+    assert 'Auction and raffle money' in pg.inner_text('#app'), 'auction option should ask for auction money per scenario'
+    pg.goto(URL + '#step-survey'); pg.wait_for_timeout(50)
+    gs = pg.text_content('#survey')
+    assert 'per item, would you buy' in gs and 'full table of 8' in gs and 'foursome' not in gs.lower(), 'survey should fit gala and product sale'
+    pg.goto(URL + '#results'); pg.wait_for_timeout(50)
+    rt = pg.inner_text('#app')
+    assert 'items sold to break even' in rt and 'leaves out auction and raffle money' in rt
+    # back to the golf example for the remaining checks
+    pg.goto(URL + '#home'); pg.click('[data-demo="golf"]'); pg.click('[data-demo="golf"]')
+    pg.wait_for_function("location.hash === '#step-event'", timeout=3000)
     # editing recomputes: shotgun price below cost -> not viable
     pg.goto(URL + '#step-prices'); pg.click('.tab >> nth=1')
     pg.fill('input[data-path="options.1.price"]', '60'); pg.press('input[data-path="options.1.price"]', 'Tab')
-    pg.fill('input[data-path="options.1.foursomePrice"]', '240'); pg.press('input[data-path="options.1.foursomePrice"]', 'Tab')
+    pg.fill('input[data-path="options.1.groupPrice"]', '240'); pg.press('input[data-path="options.1.groupPrice"]', 'Tab')
     pg.goto(URL + '#results')
     assert 'Not viable as currently configured' in pg.inner_text('#app')
     # fill-from-evidence

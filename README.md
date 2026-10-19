@@ -1,8 +1,8 @@
 # Booster Fundraiser Planner
 
-A free website that helps booster clubs, PTAs and other 501(c)(3)s decide whether a fundraiser is worth it **before** they sign a contract. Organizers enter their real quotes and ask their supporters a short survey. The site then shows break-even, cash needed up front and the worst case in plain numbers, and it says "Not enough evidence to decide yet" until there's enough real information.
+A free website that helps booster clubs, PTAs and other small volunteer groups decide whether a fundraiser (a golf outing, gala, run, auction night or product sale) is worth it **before** they sign a contract. Organizers enter their real quotes and ask their supporters a short survey. The site then shows break-even, cash needed up front and the worst case in plain numbers, and it says "Not enough evidence to decide yet" until there's enough real information.
 
-The built-in example is a golf outing comparing regular tee times with a shotgun start. **All example numbers are made up.**
+There are two built-in examples: a golf outing (regular tee times vs. a shotgun start) and a spring gala with a silent auction vs. a cookie dough sale. **All example numbers are made up.**
 
 ## Use it
 Open `index.html` in any browser. It runs entirely in the browser, with no accounts, no server and no tracking. Plans save in the visitor's own browser and can be exported as a file.

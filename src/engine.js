@@ -62,7 +62,7 @@
   }
 
   /**
-   * Venue / course bill for n participants under the quote structure:
+   * Venue or supplier bill for n units (players, guests or items) under the quote structure:
    *   bill = max(flatFee + perParticipant * max(n, minimumParticipants), minimumSpend)
    * A deposit that is credited toward the bill is NOT added; it is just part of this bill paid early.
    * A non-refundable deposit sets a floor on the bill (you lose it even if the bill would be smaller).
@@ -123,18 +123,23 @@
   }
 
   /**
-   * Registration revenue with optional foursome bundle pricing.
-   * foursomeShare (0..1) is an organizer assumption: the share of participants who register as full foursomes.
-   * Foursome players are rounded DOWN to whole foursomes; everyone else pays the individual price.
-   * A blank foursomePrice means 4 x individual price (no discount), so the share has no effect.
+   * Registration revenue with optional group pricing (a golf foursome, a table of 8 at a gala, a team at a 5K).
+   * Group size = option.groupSize. groupShare (0..1) is an organizer assumption: the share of participants who buy as a full group.
+   * Group buyers are rounded DOWN to whole groups; everyone else pays the individual price.
+   * A blank groupPrice means groupSize x individual price (no discount), so the share has no effect.
+   * Older plans used foursomePrice / foursomeShare; those are still read.
    */
   function registrationCents(option, n) {
     const indiv = c(option.price);
-    const fp = option.foursomePrice == null || option.foursomePrice === '' ? indiv * 4 : c(option.foursomePrice);
-    const share = Math.min(1, nonNeg(option.foursomeShare));
-    const foursomes = Math.floor((n * share) / 4);
-    const singles = n - foursomes * 4;
-    return { total: foursomes * fp + singles * indiv, foursomes, singles };
+    const size = Math.max(1, int(option.groupSize) || 1);
+    const gpRaw = option.groupPrice !== undefined ? option.groupPrice : option.foursomePrice;
+    const shareRaw = option.groupShare !== undefined ? option.groupShare : option.foursomeShare;
+    if (size < 2) return { total: indiv * n, groups: 0, singles: n, foursomes: 0 };
+    const gp = gpRaw == null || gpRaw === '' ? indiv * size : c(gpRaw);
+    const share = Math.min(1, nonNeg(shareRaw));
+    const groups = Math.floor((n * share) / size);
+    const singles = n - groups * size;
+    return { total: groups * gp + singles * indiv, groups, singles, foursomes: groups };
   }
 
   /**
@@ -177,7 +182,7 @@
       requested: norm.requested,
       flags: norm.flags,
       revenue: {
-        registration: d(registration), foursomes: reg.foursomes, singles: reg.singles, extras: d(extras), other: d(other),
+        registration: d(registration), groups: reg.groups, foursomes: reg.groups, singles: reg.singles, extras: d(extras), other: d(other),
         sponsorshipCash: d(sp.counted), total: d(revenue),
       },
       sponsorshipByStatus: { collected: d(sp.byStatus.collected), committed: d(sp.byStatus.committed), hoped: d(sp.byStatus.hoped) },
@@ -229,16 +234,16 @@
   function sensitivity(option, baseParticipants, ctx = {}) {
     const base = project(option, baseParticipants, ctx);
     const tests = [
-      { key: 'attendance_minus_25', label: 'Attendance 25% lower', run: () => project(option, Math.floor(base.participants * 0.75), ctx) },
+      { key: 'attendance_minus_25', label: 'Turnout or sales 25% lower', run: () => project(option, Math.floor(base.participants * 0.75), ctx) },
       { key: 'price_minus_10', label: 'Registration prices 10% lower', run: () => project({ ...option, price: nonNeg(option.price) * 0.9,
-          foursomePrice: option.foursomePrice == null || option.foursomePrice === '' ? option.foursomePrice : nonNeg(option.foursomePrice) * 0.9 }, base.participants, ctx) },
+          groupPrice: (() => { const g = option.groupPrice !== undefined ? option.groupPrice : option.foursomePrice; return g == null || g === '' ? g : nonNeg(g) * 0.9; })() }, base.participants, ctx) },
       { key: 'per_head_plus_10', label: 'Venue + per-person costs 10% higher', run: () => project({
           ...option,
           venueQuote: { ...(option.venueQuote || {}), perParticipant: nonNeg((option.venueQuote || {}).perParticipant) * 1.1 },
           perParticipantCosts: (option.perParticipantCosts || []).map((l) => ({ ...l, amount: nonNeg(l.amount) * 1.1 })),
         }, base.participants, ctx) },
       { key: 'sponsors_collected_only', label: 'Only already-collected sponsorship arrives', run: () => project(option, base.participants, { ...ctx, statuses: ['collected'] }) },
-      { key: 'no_extras', label: 'No add-on revenue (raffle, mulligans, etc.)', run: () => project(option, base.participants, { ...ctx, extraRevenuePerParticipant: 0, otherRevenue: 0 }) },
+      { key: 'no_extras', label: 'No add-on, auction or raffle income', run: () => project(option, base.participants, { ...ctx, extraRevenuePerParticipant: 0, otherRevenue: 0 }) },
     ];
     return {
       baseNet: base.net,
@@ -285,7 +290,8 @@
       sponsorships: state.sponsorships || [],
       statuses: sc.statuses || ['collected', 'committed'],
       extraRevenuePerParticipant: sc.extraRevenuePerParticipant || 0,
-      otherRevenue: sc.otherRevenue || 0,
+      // Plan-wide other income plus this option's own entry for the scenario (e.g., the organizer's auction or raffle figure).
+      otherRevenue: (Number(sc.otherRevenue) || 0) + (Number(((option.scenarioProceeds || {})[scenarioKey])) || 0),
       costContingencyPct: sc.costContingencyPct || 0,
       paidRegistrations: ((state.evidence || {}).paidRegistrations || {})[option.id] || 0,
     };
@@ -301,7 +307,9 @@
     const consCtx = scenarioContext(state, option, 'conservative');
     const cons = project(option, (option.scenarioParticipants || {}).conservative, consCtx);
     // Break-even uses only sponsorship that is collected or committed in writing.
-    const firmCtx = { ...consCtx, statuses: ['collected', 'committed'] };
+    // Break-even counts only firm money: collected/committed sponsorship and no auction or raffle estimates.
+    const proceedsLow = Number(((option.scenarioProceeds || {}).conservative)) || 0;
+    const firmCtx = { ...consCtx, statuses: ['collected', 'committed'], otherRevenue: Math.max(0, (Number(consCtx.otherRevenue) || 0) - proceedsLow) };
     const be = participantsNeeded(option, 0, firmCtx);
     const tg = participantsNeeded(option, target, firmCtx);
     const paid = int((ev.paidRegistrations || {})[option.id]);
@@ -310,10 +318,10 @@
     const responses = int(ev.surveyResponses);
 
     const missing = [];
-    if (!option.quoteVerified) missing.push('Written venue/course quote (price, minimums, deposit terms, cancellation terms) has not been verified.');
-    if (!option.costsVerified) missing.push('Other cost lines (food, prizes, carts, insurance, printing) are estimates, not quotes.');
+    if (!option.quoteVerified) missing.push('Written venue or supplier quote (price, minimums, deposit terms, cancellation terms) has not been verified.');
+    if (!option.costsVerified) missing.push('Other costs (food, prizes, supplies, insurance, printing) are estimates, not quotes.');
     if (responses === 0) missing.push('No survey responses entered yet.');
-    if (paid === 0) missing.push('No paid registrations or deposits from participants yet.');
+    if (paid === 0) missing.push('No paid sign-ups, tickets or orders yet.');
     if (option.cancellationOwed == null || option.cancellationOwed === '') missing.push('What you would owe if you cancel after the deadline on the quote has not been entered.');
     if (state.volunteerHoursAvailable == null || state.volunteerHoursAvailable === '') missing.push('Volunteer hours actually available are unknown.');
     else if (nonNeg(option.volunteerHours) > nonNeg(state.volunteerHoursAvailable)) missing.push(`Estimated volunteer need (${nonNeg(option.volunteerHours)} h) exceeds hours available (${nonNeg(state.volunteerHoursAvailable)} h).`);
@@ -338,7 +346,7 @@
     }
     if (target > 0 && !tg.reachableWithinCapacity) reasons.push(`The $${target.toLocaleString('en-US')} target is not reachable even at full capacity with only collected/committed sponsorship (max ≈ $${Math.round(tg.netAtCapacity).toLocaleString('en-US')}).`);
 
-    return { status, reasons, missing, breakEven: be, targetNeeded: tg, conservative: cons, paid, named, definitely, responses, worst: worstCase(option, state.sponsorships), cancel: cancellationExposure(option, state.sponsorships) };
+    return { status, reasons, missing, breakEven: be, targetNeeded: tg, conservative: cons, paid, named, definitely, responses, worst: worstCase(option, state.sponsorships), cancel: cancellationExposure(option, state.sponsorships), proceedsLow };
   }
 
   const STATUS_LABELS = {

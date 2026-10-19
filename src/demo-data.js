@@ -20,7 +20,7 @@
     options: [
       {
         id: 'tee', name: 'Regular tee times (fictional quote)', kind: 'golf_tee_times',
-        capacity: 48, groupSize: 4, wholeGroupsOnly: true, price: 125, foursomePrice: 460, foursomeShare: 0.5,
+        capacity: 48, groupSize: 4, wholeGroupsOnly: true, price: 125, groupPrice: 460, groupShare: 0.5,
         venueQuote: { flatFee: 0, perParticipant: 55, minimumParticipants: 0, minimumSpend: 0 },
         deposit: { amount: 250, creditedTowardBill: true, refundable: true },
         perParticipantCosts: [
@@ -36,7 +36,7 @@
       },
       {
         id: 'shotgun', name: 'Shotgun start (fictional quote)', kind: 'golf_shotgun',
-        capacity: 144, groupSize: 4, wholeGroupsOnly: true, price: 150, foursomePrice: 560, foursomeShare: 0.5,
+        capacity: 144, groupSize: 4, wholeGroupsOnly: true, price: 150, groupPrice: 560, groupShare: 0.5,
         venueQuote: { flatFee: 0, perParticipant: 70, minimumParticipants: 100, minimumSpend: 0 },
         deposit: { amount: 2000, creditedTowardBill: true, refundable: false },
         perParticipantCosts: [
@@ -52,7 +52,7 @@
       },
       {
         id: 'alt', name: 'Alternative: generic non-golf event (fictional)', kind: 'generic',
-        capacity: 120, groupSize: 1, wholeGroupsOnly: false, price: 35, foursomePrice: null, foursomeShare: 0,
+        capacity: 120, groupSize: 1, wholeGroupsOnly: false, price: 35, groupPrice: null, groupShare: 0,
         venueQuote: { flatFee: 300, perParticipant: 0, minimumParticipants: 0, minimumSpend: 0 },
         deposit: { amount: 100, creditedTowardBill: true, refundable: false },
         perParticipantCosts: [{ id: 'meal', label: 'Food', amount: 12 }],
@@ -88,7 +88,7 @@
     scenarioSettings: JSON.parse(JSON.stringify(DEMO_STATE.scenarioSettings)),
     options: [
       {
-        id: 'opt1', name: 'Option 1', kind: 'golf_tee_times', capacity: 0, groupSize: 4, wholeGroupsOnly: true, price: 0, foursomePrice: null, foursomeShare: 0,
+        id: 'opt1', name: 'Option 1', kind: 'golf_tee_times', capacity: 0, groupSize: 4, wholeGroupsOnly: true, price: 0, groupPrice: null, groupShare: 0,
         venueQuote: { flatFee: 0, perParticipant: 0, minimumParticipants: 0, minimumSpend: 0 },
         deposit: { amount: 0, creditedTowardBill: true, refundable: false },
         perParticipantCosts: [], fixedCosts: [], volunteerHours: 0, quoteVerified: false, costsVerified: false,
@@ -102,7 +102,57 @@
   BLANK_STATE.scenarioSettings.optimistic.extraRevenuePerParticipant = 0;
   BLANK_STATE.scenarioSettings.conservative.costContingencyPct = 10;
 
-  const api = { DEMO_STATE, BLANK_STATE };
+  // Second FICTIONAL example: a dinner with a silent auction compared with a cookie dough sale. All numbers invented.
+  const DEMO_GALA = {
+    schemaVersion: 1,
+    isDemo: true,
+    eventName: 'Fictional Example Club: Spring Gala vs. Cookie Dough Sale (DEMO)',
+    settings: { fundraisingTarget: 6000, volunteerHourValue: null },
+    snapshot: { format: 'Spring dinner with a silent auction, or a cookie dough sale (deciding)', dateWindow: 'April (example)', locationArea: '[area — fictional]', included: 'dinner and dessert (gala); 3 lb tub (cookie dough)', beneficiary: 'team equipment and travel (fictional)', fallbackPrice: '' },
+    volunteerHoursAvailable: null,
+    scenarioSettings: JSON.parse(JSON.stringify(DEMO_STATE.scenarioSettings)),
+    options: [
+      {
+        id: 'gala', name: 'Spring dinner & silent auction (fictional quote)', kind: 'auction',
+        capacity: 160, groupSize: 8, wholeGroupsOnly: false, price: 75, groupPrice: 550, groupShare: 0.4,
+        venueQuote: { flatFee: 1200, perParticipant: 38, minimumParticipants: 100, minimumSpend: 0 },
+        deposit: { amount: 1000, creditedTowardBill: true, refundable: false },
+        perParticipantCosts: [{ id: 'drinks', label: 'Drinks per guest', amount: 6 }],
+        fixedCosts: [
+          { id: 'decor', label: 'Decorations', amount: 400, paidUpfront: true },
+          { id: 'dj', label: 'DJ and sound', amount: 600, paidUpfront: true },
+          { id: 'bidsheets', label: 'Bid sheets and printing', amount: 120, paidUpfront: false },
+        ],
+        scenarioProceeds: { conservative: 1500, middle: 3000, optimistic: 5000 },
+        volunteerHours: 70, cancellationOwed: 1000, quoteVerified: false, costsVerified: false,
+        scenarioParticipants: { conservative: 90, middle: 120, optimistic: 150 },
+      },
+      {
+        id: 'dough', name: 'Cookie dough sale (fictional supplier quote)', kind: 'product',
+        capacity: 2000, groupSize: 1, wholeGroupsOnly: false, price: 18, groupPrice: null, groupShare: 0,
+        venueQuote: { flatFee: 0, perParticipant: 9, minimumParticipants: 0, minimumSpend: 500 },
+        deposit: { amount: 0, creditedTowardBill: true, refundable: true },
+        perParticipantCosts: [],
+        fixedCosts: [{ id: 'forms', label: 'Order forms and seller prizes', amount: 150, paidUpfront: true }],
+        volunteerHours: 25, cancellationOwed: 0, quoteVerified: false, costsVerified: false,
+        scenarioParticipants: { conservative: 300, middle: 500, optimistic: 800 },
+      },
+    ],
+    sponsorships: [
+      { id: 'g1', label: 'Table sponsor (fictional)', amount: 800, status: 'committed', type: 'cash', optionId: 'gala' },
+      { id: 'g2', label: 'Donated centerpieces (fictional)', amount: 300, status: 'committed', type: 'inKind', replacesCostId: 'decor', optionId: 'gala' },
+    ],
+    evidence: {
+      surveyResponses: 52,
+      namedHighIntent: { gala: 24, dough: 110 },
+      surveyDefinitelyAtPrice: { gala: 30, dough: 140 },
+      surveyProbablyAtPrice: { gala: 28, dough: 90 },
+      paidRegistrations: { gala: 0, dough: 0 },
+      notes: 'FICTIONAL survey summary for demonstration only. Cookie dough counts are items, not people.',
+    },
+  };
+
+  const api = { DEMO_STATE, DEMO_GALA, BLANK_STATE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.BFDemo = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -7,6 +7,14 @@
   let state = clone(window.BFDemo.DEMO_STATE);
   let touched = false; // only save once the person has actually started a plan
   try { const saved = JSON.parse(localStorage.getItem(SAVE_KEY) || 'null'); if (saved && Array.isArray(saved.options) && saved.scenarioSettings) { state = saved; touched = true; } } catch (e) { /* storage unavailable: start from demo */ }
+  function migrate(st) {
+    (st.options || []).forEach((o) => {
+      if (o.groupPrice === undefined && o.foursomePrice !== undefined) { o.groupPrice = o.foursomePrice; delete o.foursomePrice; }
+      if (o.groupShare === undefined && o.foursomeShare !== undefined) { o.groupShare = o.foursomeShare; delete o.foursomeShare; }
+    });
+    return st;
+  }
+  state = migrate(state);
   function persist() { if (!touched) return; try { localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ } }
   function hasSavedPlan() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
   function say(msg) { const el = document.getElementById('status'); if (el) { el.textContent = msg; el.hidden = !msg; } }
@@ -45,6 +53,11 @@
   };
   const txt = (path, label, cls = '') => `<label class="f ${cls}"><span>${label}</span><input type="text" data-path="${path}" value="${esc(getPath(state, path))}"></label>`;
   const chk = (path, label) => `<label class="chk"><input type="checkbox" data-path="${path}" data-type="bool" ${getPath(state, path) ? 'checked' : ''}> ${label}</label>`;
+  const selGrouped = (path, label, options) => {
+    const v = getPath(state, path) || '';
+    const groups = [...new Set(options.map((o) => o[2]))];
+    return `<label class="f"><span>${label}</span><select data-path="${path}">${groups.map((g) => `<optgroup label="${esc(g)}">${options.filter((o) => o[2] === g).map(([val, l]) => `<option value="${esc(val)}" ${val === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</optgroup>`).join('')}</select></label>`;
+  };
   const sel = (path, label, options) => {
     const v = getPath(state, path) || '';
     return `<label class="f"><span>${label}</span><select data-path="${path}">${options.map(([val, l]) => `<option value="${esc(val)}" ${val === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
@@ -64,23 +77,71 @@
       </tbody></table></div><button class="small" data-action="add-row" data-i="${i}" data-key="${key}">+ Add line</button>`;
   }
 
-  const COURSE_QUESTIONS = [
-    'What is the per-player rate, and exactly what does it include (cart, range balls, food)? Is sales tax included or added on top? Is there a service charge or gratuity?',
-    'Is there a minimum number of paid players, or a minimum total spend? Is that minimum binding if we fall short?',
-    'For a shotgun start: what is the minimum, the buyout fee, and how many players fit (holes × group size)?',
-    'For regular tee times: how many consecutive tee times can we hold, and when must unfilled times be released?',
-    'Deposit: amount, due date, is it credited toward the final bill, and is it refundable — until what date?',
-    'Cancellation and weather policy: what do we owe if we cancel, and by when must we decide?',
-    'When is the final headcount due, and when is final payment due?',
-    'Are food and beverage minimums separate from golf fees?',
-    'Can we bring our own prizes, sponsors\' signage, and raffle? Any fees or restrictions?',
-    'Does the course require event insurance or a certificate of insurance from us?',
-    'Rain or weather: who decides the course is unplayable, and is there a rain date or a credit instead of a refund?',
+  // ---------- event types ----------
+  // Each type only changes words, survey questions and checklists. The math is the same for all of them,
+  // and no type carries default prices, costs or attendance numbers.
+  const Q_COMMON = [
+    'Deposit: how much, when is it due, does it count toward the final bill, and is it refundable (until what date)?',
+    'Cancellation: what do we owe if we cancel, and by what date must we decide?',
+    'Is sales tax included in the price or added on top? Is there a service charge or gratuity?',
+    'Do you require event insurance or a certificate of insurance from us?',
   ];
+  const Q_GOLF = [
+    'What does the per-player rate include (cart, range balls, food)?',
+    'Is there a minimum number of paid players or a minimum total spend? Is it binding if we fall short?',
+    'For a shotgun start: what is the minimum, the buyout fee, and how many players fit?',
+    'For regular tee times: how many tee times can we hold, and when must unfilled ones be released?',
+    'Are food and drink minimums separate from golf fees?',
+    'Rain or weather: who decides the course is unplayable, and is there a rain date or a credit instead of a refund?',
+    'Can we bring our own prizes, sponsor signs and raffle? Any fees or restrictions?',
+  ];
+  const Q_VENUE = [
+    'What does the per-guest price include (food, drinks, staff, setup, cleanup)?',
+    'Is there a minimum guest count or a food-and-drink minimum? Is it binding if we fall short?',
+    'When is the final headcount due, and can it go down after that?',
+    'Are tables, chairs, linens, AV and decorations included or extra?',
+    'Can we bring outside food, drinks, decorations or entertainment? Is alcohol allowed, and who must serve it?',
+  ];
+  const Q_PARTICIPATION = [
+    'What permits are needed (city, park, police, road closures), and what do they cost?',
+    'Is there a minimum number of entries or a minimum total for timing, shirts or medals?',
+    'When must shirt sizes and quantities be ordered, and are unused ones refundable?',
+    'Weather: who decides to cancel, and is there a rain date?',
+  ];
+  const Q_SUPPLIER = [
+    'What is the price per item, including tax and shipping? Does it drop at higher quantities?',
+    'Is there a minimum order? Do we order before or after we collect sellers\' orders?',
+    'Can unsold items be returned? Who pays for them if they don\'t sell?',
+    'When do we have to pay the supplier, and when does the product arrive?',
+    'Who collects the money from sellers, and how are missing payments handled?',
+  ];
+  const Q_AUCTION = [
+    'Raffles: has the club confirmed it is allowed to run a raffle of this size under state rules?',
+    'Auction items: by what date must donations be in hand, and who tracks their value?',
+    'How will winners pay (card fees, checks), and what happens to unsold items?',
+    'Is there a minimum guest count or food-and-drink minimum at the venue?',
+  ];
+  const golfType = (label) => ({ label, group: 'Participation events', one: 'player', many: 'players', venue: 'course', groupName: 'foursome', survey: 'golf', perHint: 'carts, lunch, player gifts not in the course quote', fixedHint: 'prizes, hole signs, printing, insurance', questions: Q_GOLF });
+  const EVENT_TYPES = {
+    golf_tee_times: golfType('Golf: regular tee times'),
+    golf_shotgun: golfType('Golf: shotgun start'),
+    participation: { label: 'Run, walk, tournament or other sign-up event', group: 'Participation events', one: 'participant', many: 'participants', venue: 'venue', groupName: 'team', survey: 'join', perHint: 'shirts, bibs, medals, timing per person', fixedHint: 'permits, course setup, awards, insurance', questions: Q_PARTICIPATION },
+    ticketed: { label: 'Dinner, gala, trivia night or other ticketed event', group: 'Ticketed events', one: 'guest', many: 'guests', venue: 'venue', groupName: 'table', survey: 'attend', perHint: 'food and drinks per guest, favors', fixedHint: 'venue rental, decorations, entertainment, AV, insurance', questions: Q_VENUE },
+    auction: { label: 'Auction or raffle night', group: 'Auctions & raffles', one: 'guest', many: 'guests', venue: 'venue', groupName: 'table', survey: 'attend', proceeds: true, perHint: 'food and drinks per guest', fixedHint: 'venue rental, bid sheets or auction software, raffle prizes you buy, decorations', questions: Q_AUCTION.concat(Q_VENUE.slice(0, 2)) },
+    product: { label: 'Product sale (cookie dough, wreaths, discount cards, spirit gear)', group: 'Product sales', one: 'item', many: 'items', venue: 'supplier', groupName: null, survey: 'buy', perHint: 'packaging or shipping per item not in the supplier price', fixedHint: 'order forms, delivery, storage, seller prizes', questions: Q_SUPPLIER },
+    generic: { label: 'Other kind of event', group: 'Other', one: 'person', many: 'people', venue: 'venue', groupName: 'group', survey: 'attend', perHint: 'anything you pay per person', fixedHint: 'rental, supplies, printing, insurance', questions: Q_VENUE },
+  };
+  const T = (o) => EVENT_TYPES[(o && o.kind)] || EVENT_TYPES.generic;
+  const cap = (w) => w.charAt(0).toUpperCase() + w.slice(1);
+  const isGolf = (o) => T(o).survey === 'golf';
+  const KIND_OPTIONS = Object.entries(EVENT_TYPES).map(([k, t]) => [k, t.label, t.group]);
+  const questionsFor = (o) => Q_COMMON.concat(T(o).questions);
+
   const SIGNING_QUESTIONS = [
     'Who is allowed to sign the contract and hold the money: the club itself, or the school or district (often through the athletic director)?',
     'Does the school or district need to approve this fundraiser, and does it require insurance naming the district?',
     'If your plan counts on raffle income: has the club confirmed it is allowed to run a raffle of that size under state rules?',
+    'For product sales: who keeps unsold items, and who is responsible for money sellers don\'t turn in?',
     'Is every number in this plan from a written quote or a real record, not a guess?',
   ];
 
@@ -111,7 +172,7 @@
   function stepOptions() {
     return `<div class="optlist">${state.options.map((o, i) => `<div class="optrow">
         ${txt(`options.${i}.name`, `Option ${i + 1} name`, 'wide')}
-        ${sel(`options.${i}.kind`, 'Format', [['golf_tee_times', 'Golf: regular tee times'], ['golf_shotgun', 'Golf: shotgun start'], ['generic', 'Other kind of event']])}
+        ${selGrouped(`options.${i}.kind`, 'Kind of fundraiser', KIND_OPTIONS)}
         <div class="optrow-actions"><button class="small" data-action="dup-option" data-i="${i}">Duplicate</button>
         ${state.options.length > 1 ? `<button class="small danger" data-action="del-option" data-i="${i}">Remove</button>` : ''}</div>
       </div>`).join('')}</div>
@@ -119,51 +180,54 @@
   }
 
   function stepQuote() {
-    const i = cur(), p = `options.${i}`, o = state.options[i];
-    const golf = o.kind !== 'generic';
+    const i = cur(), p = `options.${i}`, o = state.options[i], t = T(o);
+    const product = t.survey === 'buy';
     return `${optionTabs('Fill this in for each option.')}
       <div class="fields">
-        ${num(p + '.venueQuote.perParticipant', golf ? 'Course charge per player, including tax and service charges ($)' : 'Venue charge per person, including tax and service charges ($)')}
-        ${num(p + '.venueQuote.minimumParticipants', golf ? 'Minimum players you must pay for (0 if none)' : 'Minimum people you must pay for (0 if none)', { step: 1 })}
-        ${num(p + '.venueQuote.flatFee', 'Flat fee or buyout ($, 0 if none)')}
-        ${num(p + '.venueQuote.minimumSpend', 'Minimum total spend ($, 0 if none)')}
-        ${num(p + '.capacity', golf ? 'Most players the course can take' : 'Most people the venue can hold', { step: 1 })}
-        ${num(p + '.groupSize', golf ? 'Players per group' : 'Group size (1 if people sign up individually)', { step: 1 })}
+        ${num(p + '.venueQuote.perParticipant', product ? 'Supplier cost per item, including tax and shipping ($)' : `${cap(t.venue)} charge per ${t.one}, including tax and service charges ($)`)}
+        ${num(p + '.venueQuote.minimumParticipants', product ? 'Items you must pay for no matter how many sell: the supplier minimum or your pre-order (0 if none)' : `Minimum ${t.many} you must pay for (0 if none)`, { step: 1 })}
+        ${num(p + '.venueQuote.flatFee', product ? 'Flat fee from the supplier ($, 0 if none)' : 'Flat fee, rental or buyout ($, 0 if none)')}
+        ${num(p + '.venueQuote.minimumSpend', product ? 'Minimum order total ($, 0 if none)' : 'Minimum total spend, such as a food-and-drink minimum ($, 0 if none)')}
+        ${num(p + '.capacity', product ? 'Most items you can get or sell' : `Most ${t.many} the ${t.venue} can take`, { step: 1 })}
+        ${t.groupName ? num(p + '.groupSize', `${cap(t.groupName)} size (1 if ${t.many} only sign up one at a time)`, { step: 1 }) : ''}
       </div>
-      <div class="checks">${chk(p + '.wholeGroupsOnly', golf ? 'Players must fill whole groups (e.g., foursomes)' : 'Only whole groups can register')}</div>
+      ${t.groupName && Number(o.groupSize) > 1 ? `<div class="checks">${chk(p + '.wholeGroupsOnly', `${cap(t.many)} can only come as full ${t.groupName}s`)}</div>` : ''}
       <h3 class="sub">Deposit</h3>
       <div class="fields">${num(p + '.deposit.amount', 'Deposit amount ($)')}</div>
       <div class="checks">${chk(p + '.deposit.creditedTowardBill', 'The deposit counts toward the final bill')}${chk(p + '.deposit.refundable', 'The deposit is refundable')}</div>
       <h3 class="sub">Cancellation</h3>
       <div class="fields">${num(p + '.cancellationOwed', 'Total you would owe if you cancel after the deadline on the quote, including any deposit you would lose ($, blank = not known yet)', { placeholder: 'not known yet', wide: true })}</div>
       <div class="callout ${o.quoteVerified ? 'ok' : ''}">${chk(p + '.quoteVerified', 'I have this quote in writing')}<span>Until this is checked, the result will say “Not enough evidence to decide yet.”</span></div>
-      <details class="qs"><summary>Questions to ask the ${golf ? 'course' : 'venue'} before signing</summary><ul class="plain">${COURSE_QUESTIONS.map((q) => `<li>${esc(q)}</li>`).join('')}</ul></details>`;
+      <details class="qs"><summary>Questions to ask the ${t.venue} before signing</summary><ul class="plain">${questionsFor(o).map((q) => `<li>${esc(q)}</li>`).join('')}</ul></details>`;
   }
 
   function stepPrices() {
-    const i = cur(), p = `options.${i}`, o = state.options[i];
-    const four = o.wholeGroupsOnly && Number(o.groupSize) === 4;
+    const i = cur(), p = `options.${i}`, o = state.options[i], t = T(o);
+    const size = Number(o.groupSize) || 1;
+    const group = t.groupName && size > 1;
+    const gp = o.groupPrice !== undefined ? 'groupPrice' : (o.foursomePrice !== undefined ? 'foursomePrice' : 'groupPrice');
+    const gs = o.groupShare !== undefined ? 'groupShare' : (o.foursomeShare !== undefined ? 'foursomeShare' : 'groupShare');
     return `${optionTabs()}
       <div class="fields">
-        ${num(p + '.price', 'Price per person ($)')}
-        ${four ? num(p + '.foursomePrice', 'Price for a full foursome ($, blank = 4 × the single price)', { placeholder: String((Number(o.price) || 0) * 4) }) : ''}
-        ${four ? pct(p + '.foursomeShare', 'Your guess: what % of players will sign up as foursomes?') : ''}
+        ${num(p + '.price', t.survey === 'buy' ? 'Selling price per item ($)' : `Price per ${t.one} ($${t.proceeds ? ', 0 if admission is free' : ''})`)}
+        ${group ? num(`${p}.${gp}`, `Price for a full ${t.groupName} of ${size} ($, blank = ${size} × the single price)`, { placeholder: String((Number(o.price) || 0) * size) }) : ''}
+        ${group ? pct(`${p}.${gs}`, `Your guess: what % of ${t.many} will buy as a full ${t.groupName}?`) : ''}
       </div>
       <p class="hint">These exact prices go into the supporter survey, so a “Yes” always means yes at this price.</p>`;
   }
 
   function stepCosts() {
-    const i = cur(), p = `options.${i}`;
+    const i = cur(), p = `options.${i}`, t = T(state.options[i]);
     return `${optionTabs()}
-      <h3 class="sub">Costs for each person who comes <span class="muted">(meals, gifts, carts not in the quote)</span></h3>
+      <h3 class="sub">Costs for each ${t.one} <span class="muted">(${esc(t.perHint)})</span></h3>
       ${costRows(i, 'perParticipantCosts', false)}
-      <h3 class="sub">One-time costs <span class="muted">(prizes, signs, printing, insurance)</span></h3>
+      <h3 class="sub">One-time costs <span class="muted">(${esc(t.fixedHint)})</span></h3>
       ${costRows(i, 'fixedCosts', true)}
       <div class="callout ${state.options[i].costsVerified ? 'ok' : ''}">${chk(p + '.costsVerified', 'These costs are real quotes, not guesses')}</div>`;
   }
 
   function stepScenarios() {
-    const i = cur(), p = `options.${i}`, o = state.options[i];
+    const i = cur(), p = `options.${i}`, o = state.options[i], t = T(o);
     const ss = state.scenarioSettings;
     const statusBoxes = (k) => E.SPONSOR_STATUSES.map((st) =>
       `<label class="chk"><input type="checkbox" data-scenario-status="${k}" value="${st}" ${ss[k].statuses.includes(st) ? 'checked' : ''}> ${st}</label>`).join('');
@@ -171,12 +235,14 @@
       ${anchors(o)}
       <div class="row-actions"><button class="small" data-action="fill-evidence" data-i="${i}">Use my survey numbers for low and likely</button></div>
       <div class="scen">
-        ${SC.map((k) => `<div class="scen-col"><b>${esc(ss[k].label)}</b><span class="hint">${{ conservative: 'If turnout disappoints. Start with paid sign-ups only.', middle: 'What your evidence supports: paid + named “yes”.', optimistic: 'If outreach goes well. Stay at or under capacity.' }[k]}</span>
-          ${num(`${p}.scenarioParticipants.${k}`, 'People who pay', { step: 1 })}</div>`).join('')}
+        ${SC.map((k) => `<div class="scen-col"><b>${esc(ss[k].label)}</b><span class="hint">${{ conservative: t.survey === 'buy' ? 'If sales disappoint. Start with paid orders only.' : 'If turnout disappoints. Start with paid sign-ups only.', middle: 'What your evidence supports: paid + named “yes”.', optimistic: 'If outreach goes well. Stay at or under capacity.' }[k]}</span>
+          ${num(`${p}.scenarioParticipants.${k}`, t.survey === 'buy' ? 'Items sold' : `Paying ${t.many}`, { step: 1 })}
+          ${t.proceeds ? num(`${p}.scenarioProceeds.${k}`, 'Auction and raffle money you would count on ($)') : ''}</div>`).join('')}
       </div>
+      ${t.proceeds ? '<p class="hint">Auction and raffle money is your own figure for each case. Donated items don\'t guarantee bids, so keep the low case low.</p>' : ''}
       <details class="qs"><summary>Adjust assumptions (sponsors counted, raffle income, cost cushion)</summary>
         <div class="table-wrap"><table class="edit">
-          <thead><tr><th></th><th>Sponsors counted</th><th>Extra income per person ($)<br><span class="muted">raffle, mulligans</span></th><th>Other income ($)</th><th>Cost cushion %<br><span class="muted">not on the venue quote</span></th></tr></thead>
+          <thead><tr><th></th><th>Sponsors counted</th><th>Extra income per person ($)<br><span class="muted">raffle tickets, add-ons, mulligans</span></th><th>Other income ($)</th><th>Cost cushion %<br><span class="muted">not on the venue quote</span></th></tr></thead>
           <tbody>${SC.map((k) => `<tr><td><b>${esc(ss[k].label)}</b></td><td>${statusBoxes(k)}</td>
             <td><input type="number" inputmode="decimal" step="any" min="0" data-path="scenarioSettings.${k}.extraRevenuePerParticipant" data-type="number" value="${esc(ss[k].extraRevenuePerParticipant)}" aria-label="${esc(ss[k].label)} extra income per person"></td>
             <td><input type="number" inputmode="decimal" step="any" min="0" data-path="scenarioSettings.${k}.otherRevenue" data-type="number" value="${esc(ss[k].otherRevenue)}" aria-label="${esc(ss[k].label)} other income"></td>
@@ -224,35 +290,56 @@
     const f = (k, ph) => String(s[k] || '').trim() || `[${ph}]`;
     // One price per option, taken from the prices step, so every "Yes" maps 1:1 to the price the planner evaluates.
     const opts = state.options.slice(0, 3);
-    const hasGolf = opts.some((o) => o.kind !== 'generic');
-    const hasOther = opts.some((o) => o.kind === 'generic');
+    const kinds = new Set(opts.map((o) => T(o).survey));
+    const hasGolf = kinds.has('golf');
+    const onlyProducts = kinds.size === 1 && kinds.has('buy');
+    const hasGroups = opts.some((o) => T(o).groupName && Number(o.groupSize) > 1);
     const letters = 'abc';
-    const fourOf = (o) => (o.foursomePrice == null || o.foursomePrice === '' ? (Number(o.price) * 4 || '[team price]') : (Number(o.foursomePrice) || '[team price]'));
+    const groupPrice = (o) => { const g = o.groupPrice !== undefined ? o.groupPrice : o.foursomePrice; const n = Number(o.groupSize) || 1; return g == null || g === '' ? (Number(o.price) * n || '[group price]') : (Number(g) || '[group price]'); };
     const fb = String(s.fallbackPrice || '').trim().replace(/^\$/, '');
     const priceQs = opts.map((o, k) => {
-      const unit = o.kind === 'generic' ? 'person' : 'player';
-      const team = o.wholeGroupsOnly && Number(o.groupSize) === 4 ? ` (or $${fourOf(o)} for a group of 4)` : '';
-      return `Q4${letters[k]}. ${o.name}: if it cost $${Number(o.price) || '[price]'} per ${unit}${team}, would you sign up?
-   ( ) Yes, I would sign up and pay this price if the date works
-   ( ) Maybe, I'm interested but not sure yet
+      const t = T(o), q = `Q4${letters[k]}. ${o.name}`;
+      if (t.survey === 'buy') return `${q}: at $${Number(o.price) || '[price]'} per item, would you buy?
+   ( ) Yes, about how many?  ( ) 1  ( ) 2  ( ) 3 or more
+   ( ) Maybe, I'm not sure yet
    ( ) No, that price is more than I would pay
+   ( ) No, I'm not interested in this product`;
+      const n = Number(o.groupSize) || 1;
+      const group = t.groupName && n > 1 ? ` (or $${groupPrice(o)} for a full ${t.groupName} of ${n})` : '';
+      const free = t.proceeds && !Number(o.price);
+      const ask = free ? 'admission is free; would you come and take part in the auction or raffle?' : `if it cost $${Number(o.price) || '[price]'} per ${t.one}${group}, would you ${t.survey === 'attend' ? 'buy a ticket' : 'sign up'}?`;
+      return `${q}: ${ask}
+   ( ) Yes, I would ${free ? 'come' : t.survey === 'attend' ? 'buy a ticket' : 'sign up and pay this price'} if the date works
+   ( ) Maybe, I'm interested but not sure yet
+   ${free ? '( ) No, probably not' : '( ) No, that price is more than I would pay'}
    ( ) No, I wouldn't do this one at any price`;
     }).join('\n\n') + (fb ? `
 
-Q4${letters[opts.length] || 'x'}. ONLY if you answered "more than I would pay" above: would you sign up for a simpler, lower-cost version at about $${fb} per person?
+Q4${letters[opts.length] || 'x'}. ONLY if you answered "more than I would pay" above: would you take part in a simpler, lower-cost version at about $${fb}?
    ( ) Yes  ( ) Maybe  ( ) No` : '');
+    const others = opts.filter((o) => !isGolf(o));
     const golfQ2 = `Q2. Which best describes you?
    ( ) I golf regularly
    ( ) I golf now and then, or I'm a beginner who'd enjoy a casual scramble
-   ( ) I don't golf${hasOther ? ', but I might come to the non-golf option (skip Q3, then answer Q4 for that option)' : ', but I might support another way  -> skip to Q6'}
-   ( ) I'm not interested in an event like this  -> skip to Q6`;
-    const otherQ2 = `Q2. Would you be interested in attending an event like this?
-   ( ) Yes  ( ) Maybe  ( ) No  -> skip to Q6`;
+   ( ) I don't golf${others.length ? ', but I might take part in one of the other options (skip Q3, then answer Q4 for those)' : ', but I might support another way  -> skip to Q6'}
+   ( ) I'm not interested in any of these  -> skip to Q6`;
+    const otherQ2 = onlyProducts ? '' : `Q2. Would you be interested in taking part in a fundraiser like this?
+   ( ) Yes  ( ) Maybe  ( ) No  -> skip to Q6
+
+`;
+    const q3 = hasGroups ? `Q3. If you took part, how would you most likely do it?
+   ( ) On my own
+   ( ) With one other person
+   ( ) With a full group or table, made up of people who are NOT getting this survey
+   ( ) With a full group or table, including people who are also getting this survey
+   ( ) Not sure yet
+
+` : '';
     return `DRAFT: review and edit before sending. Anonymous unless the respondent chooses to answer Q8.
 Adults only: do not send to students or minors, and do not ask about them.
 
-THE EVENT WE ARE CONSIDERING
-Format: ${f('format', 'format')}
+WHAT WE ARE CONSIDERING
+What: ${f('format', 'what it is')}
 When: ${f('dateWindow', 'date window')}
 Where: ${f('locationArea', 'location area')}
 Included: ${f('included', 'what is included')}
@@ -262,41 +349,32 @@ Answering does not commit you to anything. Please answer with what you would rea
 Q1. How are you connected to our program? (choose all)
    Current parent/guardian · Alumni or alumni parent · Extended family · Coach/staff · Local business/community supporter · Other
 
-${hasGolf ? golfQ2 : otherQ2}
+${hasGolf ? golfQ2 + '\n\n' : otherQ2}${q3}${priceQs}
 
-Q3. If you signed up, how would you most likely do it?
-   ( ) On my own (put me with others)
-   ( ) With one other person
-   ( ) With a full group of 4, made up of people who are NOT getting this survey
-   ( ) With a full group of 4, including people who are also getting this survey
-   ( ) Not sure yet
+Q5. ${onlyProducts ? 'When would you most likely buy? (choose all)  [edit to your real options]\n   Before the holidays · At a game or school event · Online any time · Not sure' : 'Which times could work for you? (choose all)  [edit to your real options]\n   Weekday evening · Friday · Saturday daytime · Saturday evening · Sunday · None of these'}
 
-${priceQs}
-
-Q5. Which times could work for you? (choose all)  [edit to your real options]
-   Friday morning · Friday afternoon · Saturday morning · Saturday evening · Sunday afternoon · None of these
-
-Q6. What would most likely keep you from signing up? (choose up to 2)
-   Price · Time commitment · Family or youth-sports schedule · Work conflict${hasGolf ? ' · Not comfortable golfing / no clubs' : ''} · Prefer to donate directly · Nothing major
+Q6. What would most likely keep you from taking part? (choose up to 2)
+   Price · Time commitment · Family or youth-sports schedule · Work conflict${hasGolf ? ' · Not comfortable golfing / no clubs' : ''} · Already asked to buy or give too often · Prefer to donate directly · Nothing major
 
 Q7. Would you consider supporting in another way? (choose all)
-   A business I'm connected to might sponsor · Donate a raffle/auction item · Volunteer at the event · Make a direct donation · Not right now
+   A business I'm connected to might sponsor · Donate an item for an auction or raffle · Volunteer · Make a direct donation · Not right now
 
-Q8. OPTIONAL: If you answered "Yes" in Q4 and would like early registration or sponsorship information, leave a name and one way to reach you.
-   This is voluntary and will only be used to follow up about this event.
+Q8. OPTIONAL: If you answered "Yes" in Q4 and would like early sign-up, ordering or sponsorship information, leave a name and one way to reach you.
+   This is voluntary and will only be used to follow up about this fundraiser.
 
 ---
 Organizer notes (do not send):
 - Named "yes" answers (step 8) = people who answered "Yes" to that option's Q4 AND left their name in Q8.
-- Count each response as 1 person. Count a group of 4 as 4 only if the respondent chose "people who are NOT getting this survey" AND confirmed the group with you directly. Otherwise the same people may be counted twice.
+- Count people for events and items for product sales (add up the quantities; count "3 or more" as 3).
+- Count a group or table as its full size only if the respondent chose "people who are NOT getting this survey" AND confirmed it with you directly. Otherwise the same people may be counted twice.
 - "Yes" without Q8 = anonymous "Yes". "Maybe" = "Maybe". Count each person once per option.
-- Edit the option names above into plain language before sending.
-Report raw counts, never percentages applied to a whole school or community. Survey answers usually overstate real sign-ups.`;
+- Edit the option names above into plain language, and delete questions that don't fit, before sending.
+Report raw counts, never percentages applied to a whole school or community. Survey answers usually overstate real sign-ups and sales.`;
   }
 
   function stepSurvey() {
     return `<div class="fields">
-        ${txt('snapshot.format', 'Event format, in plain words', 'wide')}
+        ${txt('snapshot.format', 'What it is, in plain words (e.g., “golf scramble” or “cookie dough sale”)', 'wide')}
         ${txt('snapshot.dateWindow', 'When')}
         ${txt('snapshot.locationArea', 'Where (general area)')}
         ${txt('snapshot.included', 'What the price includes', 'wide')}
@@ -316,7 +394,8 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <tbody>${state.options.map((o) => `<tr><td>${esc(o.name)}</td><td>${field('paidRegistrations', o)}</td><td>${field('namedHighIntent', o)}</td><td>${field('surveyDefinitelyAtPrice', o)}</td><td>${field('surveyProbablyAtPrice', o)}</td></tr>`).join('')}</tbody>
       </table></div>
       <ul class="plain hint">
-        <li>Count <b>players</b>. A foursome captain counts as 4 only if they confirmed their team.</li>
+        <li>Count <b>people</b> for events and <b>items</b> for product sales (add up quantities; count “3 or more” as 3).</li>
+        <li>Count someone buying for a whole group or table as the full group only if they confirmed it and the others aren't also on your survey list.</li>
         <li>Count each person once per option. Someone who left their name doesn't also go in “anonymously”.</li>
         <li>Enter totals only. Names stay in your own records, never in this planner.</li>
       </ul>
@@ -329,26 +408,27 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   // ---------- results ----------
   function chart(o, curve, marks, target) {
     if (!curve.length) return '';
-    const W = 560, H = 200, L = 64, R = 12, T = 12, B = 30;
+    const W = 560, H = 200, L = 64, R = 12, TOP = 12, B = 30;
     const xs = curve.map((p) => p.participants), ys = curve.map((p) => p.net).concat([0, target || 0]);
     const xMax = Math.max(1, ...xs), yMin = Math.min(...ys), yMax = Math.max(...ys);
     const yPad = (yMax - yMin) * 0.08 || 100;
     const y0 = yMin - yPad, y1 = yMax + yPad;
     const X = (v) => L + (v / xMax) * (W - L - R);
-    const Y = (v) => T + (1 - (v - y0) / (y1 - y0)) * (H - T - B);
+    const Y = (v) => TOP + (1 - (v - y0) / (y1 - y0)) * (H - TOP - B);
     const path = curve.map((p, k) => `${k ? 'L' : 'M'}${X(p.participants).toFixed(1)},${Y(p.net).toFixed(1)}`).join('');
     const ticks = [y0 + yPad, 0, y1 - yPad].filter((v, k, a) => a.indexOf(v) === k);
     const data = esc(JSON.stringify(curve));
-    return `<figure class="chart" data-curve="${data}" data-l="${L}" data-r="${R}" data-w="${W}" data-xmax="${xMax}">
-      <figcaption>Net proceeds at every feasible participant count (firm sponsorship only)</figcaption>
+    const t = T(o);
+    return `<figure class="chart" data-curve="${data}" data-l="${L}" data-r="${R}" data-w="${W}" data-xmax="${xMax}" data-unit="${esc(t.many)}">
+      <figcaption>Money left after costs at every possible number of ${esc(t.many)} (collected and committed sponsorship only)</figcaption>
       <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Net proceeds by participant count for ${esc(o.name)}">
         ${ticks.map((t) => `<line x1="${L}" x2="${W - R}" y1="${Y(t)}" y2="${Y(t)}" class="${t === 0 ? 'zero' : 'grid'}"/><text x="${L - 6}" y="${Y(t) + 4}" class="ax" text-anchor="end">${money(Math.round(t))}</text>`).join('')}
         ${target ? `<line x1="${L}" x2="${W - R}" y1="${Y(target)}" y2="${Y(target)}" class="target"/><text x="${W - R}" y="${Y(target) - 4}" class="ax" text-anchor="end">target ${money(target)}</text>` : ''}
         <path d="${path}" class="line"/>
         ${marks.map((m, k) => { const dup = marks.slice(0, k).filter((q) => q.n === m.n).length; const anchor = X(m.n) > W - 70 ? 'end' : X(m.n) < L + 40 ? 'start' : 'middle';
           return `<circle cx="${X(m.n)}" cy="${Y(m.net)}" r="4.5" class="mk"/><text x="${X(m.n)}" y="${Y(m.net) - 9 - dup * 13}" class="ax" text-anchor="${anchor}">${esc(m.label)}</text>`; }).join('')}
-        <text x="${L}" y="${H - 8}" class="ax">0</text><text x="${W - R}" y="${H - 8}" class="ax" text-anchor="end">${xMax} participants</text>
-        <line class="xh" x1="0" x2="0" y1="${T}" y2="${H - B}" visibility="hidden"/>
+        <text x="${L}" y="${H - 8}" class="ax">0</text><text x="${W - R}" y="${H - 8}" class="ax" text-anchor="end">${xMax} ${esc(t.many)}</text>
+        <line class="xh" x1="0" x2="0" y1="${TOP}" y2="${H - B}" visibility="hidden"/>
       </svg><div class="tip" hidden></div></figure>`;
   }
 
@@ -360,7 +440,8 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   function analyse(o) {
     const proj = {};
     SC.forEach((k) => { proj[k] = E.project(o, (o.scenarioParticipants || {})[k], E.scenarioContext(state, o, k)); });
-    const firmCtx = { ...E.scenarioContext(state, o, 'middle'), statuses: ['collected', 'committed'] };
+    const midCtx = E.scenarioContext(state, o, 'middle');
+    const firmCtx = { ...midCtx, statuses: ['collected', 'committed'], otherRevenue: Math.max(0, midCtx.otherRevenue - (Number((o.scenarioProceeds || {}).middle) || 0)) };
     const dec = E.decide(state, o);
     return { proj, dec, curve: E.netCurve(o, firmCtx), sens: E.sensitivity(o, (o.scenarioParticipants || {}).middle, E.scenarioContext(state, o, 'middle')) };
   }
@@ -391,12 +472,12 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       <div class="table-wrap"><table class="res sc">
         <thead><tr><th></th>${SC.map((k) => `<th>${esc(ss[k].label)}<br><span class="muted">sponsors: ${ss[k].statuses.join(' + ') || 'none'}</span></th>`).join('')}</tr></thead>
         <tbody>
-          ${row('Participants', (p) => `${p.participants}${flags(p)}`)}
-          ${row('Registration revenue', (p) => money(p.revenue.registration) + (p.revenue.foursomes ? ` <span class="muted">${p.revenue.foursomes} foursomes + ${p.revenue.singles} singles</span>` : ''))}
-          ${row('Add-on revenue', (p) => money(p.revenue.extras + p.revenue.other))}
+          ${row(cap(T(o).many), (p) => `${p.participants}${flags(p)}`)}
+          ${row(T(o).survey === 'buy' ? 'Sales' : 'Ticket and registration revenue', (p) => money(p.revenue.registration) + (p.revenue.groups ? ` <span class="muted">${p.revenue.groups} ${esc(T(o).groupName || 'group')}s + ${p.revenue.singles} single</span>` : ''))}
+          ${row(T(o).proceeds ? 'Add-ons, auction and raffle' : 'Add-on revenue', (p) => money(p.revenue.extras + p.revenue.other))}
           ${row('Sponsorship cash counted', (p) => money(p.revenue.sponsorshipCash))}
           ${row('Total revenue', (p) => money(p.revenue.total), 'sum')}
-          ${row('Venue / course', (p) => money(p.expenses.venue) + (p.expenses.venueMinimumApplied ? ` <span class="flag">minimum applies (billed ${p.expenses.venueBilledParticipants})</span>` : ''))}
+          ${row(cap(T(o).venue), (p) => money(p.expenses.venue) + (p.expenses.venueMinimumApplied ? ` <span class="flag">minimum applies (billed ${p.expenses.venueBilledParticipants})</span>` : ''))}
           ${row('Other per-participant costs', (p) => money(p.expenses.perParticipant))}
           ${row('Fixed costs (after qualifying in-kind)', (p) => money(p.expenses.fixed))}
           ${row('Separate (non-credited) deposit fee', (p) => money(p.expenses.separateDepositFee))}
@@ -416,24 +497,26 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     </details>`;
   }
 
-  function readAloud(d, P, round) {
+  function readAloud(o, d, P, round) {
+    const t = T(o);
     const firm = P.middle.sponsorshipByStatus.collected + P.middle.sponsorshipByStatus.committed;
     const have = d.paid + d.named;
     if (!d.breakEven.reachableWithinCapacity) return `Even at full capacity of ${d.breakEven.maxFeasible}, this option loses money on collected and committed sponsorship as currently priced, so it should not go ahead as configured.`;
-    return `With ${money(firm)} in collected and committed sponsorship, we need ${d.breakEven.participants} paying participants to break even. Right now we have ${have} (paid registrations plus named survey “yes” answers)${d.breakEven.participants > have ? `, a gap of ${d.breakEven.participants - have}` : ', which meets the headcount check only. Named “yes” answers are not paid registrations'}. If nobody registers, we would be at about ${round(d.worst.netIfNobodyRegisters)}.`;
+    return `With ${money(firm)} in collected and committed sponsorship, we need ${d.breakEven.participants} ${t.survey === 'buy' ? 'items sold' : 'paying ' + t.many} to break even. Right now we have ${have} (paid registrations plus named survey “yes” answers)${d.breakEven.participants > have ? `, a gap of ${d.breakEven.participants - have}` : ', which meets the headcount check only. Named “yes” answers are not paid registrations'}. ${t.survey === 'buy' ? 'If nothing sells' : 'If nobody registers'}, we would be at about ${round(d.worst.netIfNobodyRegisters)}.`;
   }
 
   function renderSummary(all) {
     return state.options.map((o, i) => {
-      const a = all[i], d = a.dec, P = a.proj;
+      const a = all[i], d = a.dec, P = a.proj, t = T(o);
       const top = a.sens.results[0];
       const lines = [];
       lines.push(...d.reasons);
-      if (d.breakEven.reachableWithinCapacity && d.breakEven.participants === 0) lines.push('Collected and committed sponsorship alone would cover costs even with zero participants — confirm sponsors still pay if the event is small or canceled.');
-      else if (d.breakEven.reachableWithinCapacity) lines.push(`With only collected and committed sponsorship, you need ${d.breakEven.participants} paying participants to cover costs (feasible capacity ${d.breakEven.maxFeasible}).`);
-      lines.push(`If attendance comes in at the conservative ${P.conservative.participants}, projected net is ${hm(P.conservative.net)}; at the middle ${P.middle.participants}, ${hm(P.middle.net)}.`);
+      if (d.breakEven.reachableWithinCapacity && d.breakEven.participants === 0) lines.push(`Collected and committed sponsorship alone would cover costs even with zero ${t.many}. Confirm sponsors would still pay if the event is small or canceled.`);
+      else if (d.breakEven.reachableWithinCapacity) lines.push(`With only collected and committed sponsorship, you need ${d.breakEven.participants} ${t.survey === 'buy' ? 'items sold' : 'paying ' + t.many} to cover costs (most possible: ${d.breakEven.maxFeasible}).`);
+      lines.push(`At the low number you entered (${P.conservative.participants} ${t.many}), projected net is ${hm(P.conservative.net)}; at the middle ${P.middle.participants}, ${hm(P.middle.net)}.`);
       if (d.worst.contractualFloor > 0) lines.push(`From the minimums and deposit you entered, the venue bill at low turnout is about ${hm(d.worst.contractualFloor)}. That isn't a cancellation fee, and it only applies if those are the terms you actually sign.`);
       if (d.cancel) lines.push(`If you cancel after the quote's deadline: about ${hm(d.cancel.owedToVenue)} to the venue, plus ${hm(d.cancel.alreadySpent)} already spent on items paid in advance.`);
+      if (d.proceedsLow > 0) lines.push(`Break-even leaves out auction and raffle money, because bids aren't promised. Your own low estimate is about ${hm(d.proceedsLow)}, which is counted in the scenarios but not in break-even.`);
       if (top) lines.push(`The single assumption that moves the middle case most: “${top.label}” (${top.change >= 0 ? '+' : ''}${money(top.change)}).`);
       if (P.middle.upfront.gap > 0) lines.push(`You would need ${money(P.middle.upfront.gap)} more cash than you have in hand before the event.`);
       if (P.middle.sponsorshipByStatus.hoped > 0) lines.push(`${money(P.middle.sponsorshipByStatus.hoped)} of sponsorship is only hoped-for and is excluded from break-even.`);
@@ -442,12 +525,12 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       const beGap = d.breakEven.reachableWithinCapacity ? Math.max(0, d.breakEven.participants - d.paid - d.named) : 0;
       const perHour = vh ? P.middle.net / vh : null;
       return `<div class="sum"><h4><span class="badge ${statusClass(d.status)}"><i>${statusIcon(d.status)}</i>${esc(E.STATUS_LABELS[d.status])}</span> ${esc(o.name)}</h4>
-        <p class="aloud"><b>What to tell the board (30 seconds):</b> ${esc(readAloud(d, P, (x) => money(E.roundHeadline(x))))}</p>
+        <p class="aloud"><b>What to tell the board (30 seconds):</b> ${esc(readAloud(o, d, P, (x) => money(E.roundHeadline(x))))}</p>
         <div class="cards">
-          <div class="card ${beGap > 0 || !d.breakEven.reachableWithinCapacity ? 'bad' : ''}"><span>Break-even vs. evidence</span><b>${d.breakEven.reachableWithinCapacity ? d.breakEven.participants : '—'} needed · ${d.paid + d.named} paid or named</b><em>players needed (firm sponsorship) vs. paid sign-ups + named “yes” answers. Named answers are not money.</em></div>
+          <div class="card ${beGap > 0 || !d.breakEven.reachableWithinCapacity ? 'bad' : ''}"><span>Break-even vs. evidence</span><b>${d.breakEven.reachableWithinCapacity ? d.breakEven.participants : '—'} needed · ${d.paid + d.named} paid or named</b><em>${esc(t.many)} needed (firm sponsorship) vs. paid + named “yes” answers. Named answers are not money.</em></div>
           <div class="card"><span>Cash needed before event day</span><b>${hm(P.middle.upfront.required)}</b><em>deposit + bills due before the event; short by ${hm(P.middle.upfront.gap)} vs. cash in hand</em></div>
-          <div class="card"><span>Course contract floor</span><b>${hm(d.worst.contractualFloor)}</b><em>the least the venue bills even if turnout is zero, from the minimums and deposit you entered</em></div>
-          <div class="card ${d.worst.netIfNobodyRegisters < 0 ? 'bad' : ''}"><span>Net if nobody registers</span><b>${hm(d.worst.netIfNobodyRegisters)}</b><em>collected sponsor cash minus the contract floor and all one-time costs, including ones paid later</em></div>
+          <div class="card"><span>Contract floor</span><b>${hm(d.worst.contractualFloor)}</b><em>the least the ${esc(t.venue)} bills even if ${t.survey === 'buy' ? 'nothing sells' : 'nobody comes'}, from the minimums and deposit you entered</em></div>
+          <div class="card ${d.worst.netIfNobodyRegisters < 0 ? 'bad' : ''}"><span>${t.survey === 'buy' ? 'Net if nothing sells' : 'Net if nobody registers'}</span><b>${hm(d.worst.netIfNobodyRegisters)}</b><em>collected sponsor cash minus the contract floor and all one-time costs, including ones paid later</em></div>
           <div class="card"><span>Middle-case net</span><b>${hm(P.middle.net)}</b><em>at low turnout (${P.conservative.participants}): ${hm(P.conservative.net)}</em></div>
           <div class="card"><span>Volunteer hours</span><b>${vh} h</b><em>${perHour == null ? '—' : `≈ ${money(Math.round(perHour))} net per hour (middle)`}</em></div>
         </div>
@@ -479,9 +562,9 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     for (const o of state.options) {
       const a = analyse(o), d = a.dec, P = a.proj;
       L.push('', `## ${o.name}`, `**Status: ${E.STATUS_LABELS[d.status]}**`);
-      L.push('', `> **Read-aloud (30 seconds):** ${readAloud(d, P, (x) => money(E.roundHeadline(x)))}`, '');
+      L.push('', `> **Read-aloud (30 seconds):** ${readAloud(o, d, P, (x) => money(E.roundHeadline(x)))}`, '');
       d.reasons.forEach((r) => L.push(`- ${r}`));
-      L.push(`- Break-even (firm sponsorship only): ${d.breakEven.reachableWithinCapacity ? d.breakEven.participants + ' participants' : 'not reachable within capacity'} of ${d.breakEven.maxFeasible} feasible.`);
+      L.push(`- Break-even (firm sponsorship only): ${d.breakEven.reachableWithinCapacity ? d.breakEven.participants + ' ' + T(o).many : 'not reachable within capacity'} of ${d.breakEven.maxFeasible} feasible.`);
       L.push(`- Net: conservative ${hm(P.conservative.net)} (${P.conservative.participants}), middle ${hm(P.middle.net)} (${P.middle.participants}), optimistic ${hm(P.optimistic.net)} (${P.optimistic.participants}).`);
       L.push(`- Cash needed before the event: ${hm(P.middle.upfront.required)}. Worst case if nobody registers: ${hm(d.worst.netIfNobodyRegisters)}. Volunteer hours: ${P.middle.volunteerHours}.`);
       L.push(`- Evidence: ${d.paid} paid, ${d.named} named high-intent, ${d.definitely} anonymous "definitely", ${d.responses} responses.`);
@@ -496,14 +579,14 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   // ---------- views ----------
   const STEPS = [
     { id: 'event', title: 'What are you planning?', help: 'Start with a name and a goal. You can change anything later.', body: stepEvent },
-    { id: 'options', title: 'Which options are you comparing?', help: 'For golf, that\'s usually regular tee times against a shotgun start. You can also compare golf with a different kind of event.', body: stepOptions },
-    { id: 'quote', title: 'What will the venue charge?', help: 'Copy these numbers from the written quote. Minimums matter most: they are what you owe even if few people come.', body: stepQuote },
-    { id: 'prices', title: 'What will you charge?', help: 'Pick the price you would actually put on the sign-up form.', body: stepPrices },
-    { id: 'costs', title: 'What else will it cost?', help: 'Anything not already in the venue quote.', body: stepCosts },
+    { id: 'options', title: 'Which options are you comparing?', help: 'Add each idea you are weighing, such as tee times against a shotgun start, a gala against a product sale, or this year\'s event against a smaller one. Pick what kind of fundraiser each one is.', body: stepOptions },
+    { id: 'quote', title: 'What will the venue or supplier charge?', help: 'Copy these numbers from the written quote. Minimums matter most: they are what you owe even if few people come.', body: stepQuote },
+    { id: 'prices', title: 'What will you charge?', help: 'Pick the price you would actually put on the sign-up or order form.', body: stepPrices },
+    { id: 'costs', title: 'What else will it cost?', help: 'Anything not already in the venue or supplier quote.', body: stepCosts },
     { id: 'sponsors', title: 'Who is sponsoring?', help: 'Only money that is collected or promised in writing counts toward break-even. Hoped-for sponsors are shown, but never relied on.', body: () => renderSponsors() },
-    { id: 'survey', title: 'Ask your supporters', help: 'A short survey asks adults whether they would play, in which format, at your price. A “yes” is interest, not a registration. It stays anonymous unless someone chooses to leave a name.', body: stepSurvey },
-    { id: 'evidence', title: 'What did supporters say?', help: 'Type in the totals from your survey and any paid sign-ups so far.', body: stepEvidence },
-    { id: 'scenarios', title: 'Plan for low, likely and high turnout', help: 'These are your numbers, not predictions. The survey counts are shown beside them so you can stay honest.', body: stepScenarios },
+    { id: 'survey', title: 'Ask your supporters', help: 'A short survey asks adults whether they would take part or buy, which option they prefer, and at what price. A “yes” is interest, not a sign-up or a sale. It stays anonymous unless someone chooses to leave a name.', body: stepSurvey },
+    { id: 'evidence', title: 'What did supporters say?', help: 'Type in the totals from your survey and any paid sign-ups or orders so far.', body: stepEvidence },
+    { id: 'scenarios', title: 'Plan for low, likely and high results', help: 'These are your numbers, not predictions. The survey counts are shown beside them so you can stay honest.', body: stepScenarios },
     { id: 'volunteers', title: 'How much volunteer time will it take?', help: 'A profitable event can still be a bad trade if it burns out your volunteers.', body: stepVolunteers },
   ];
   let view = 'home', stepIdx = 0, savePanel = false;
@@ -523,16 +606,17 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     return `<section class="hero">
         <p class="eyebrow">For booster clubs, PTAs and other small volunteer groups</p>
         <h1>See whether your numbers work <em>before</em> you sign the contract.</h1>
-        <p class="lede">Golf outings, galas and auctions can lock you into big minimums. This planner puts your real quotes next to real answers from your supporters, so the board sees the risk in plain numbers.</p>
+        <p class="lede">Golf outings, galas, product sales and auctions can lock you into minimums, deposits and upfront orders. This planner puts your real quotes next to real answers from your supporters, so the board sees the risk in plain numbers.</p>
         <div class="cta">
           ${hasSaved ? `<button class="btn" data-action="nav" data-to="step-event">Continue my plan</button>` : ''}
-          <button class="btn ${hasSaved ? 'ghost' : ''}" data-action="start-demo">Try the golf example (made-up numbers)</button>
+          <button class="btn ${hasSaved ? 'ghost' : ''}" data-action="start-demo" data-demo="golf">Try a golf example (made-up numbers)</button>
+          <button class="btn ghost" data-action="start-demo" data-demo="gala">Try a gala vs. product sale example</button>
           <button class="btn ghost" data-action="start-blank">Start a new plan</button>
         </div>
         <p class="hint">Free. Nothing to install. Your plan stays in your own browser.</p>
       </section>
       <section class="how">
-        <div><span class="num">1</span><h3>Enter your real quotes</h3><p>Course fees, player minimums, deposits, prizes. The planner works out what you owe even if turnout is low.</p></div>
+        <div><span class="num">1</span><h3>Enter your real quotes</h3><p>Venue or supplier prices, minimums, deposits, prizes. The planner works out what you owe even if turnout or sales are low.</p></div>
         <div><span class="num">2</span><h3>Ask your supporters</h3><p>Get a ready-to-send survey with your exact prices. Enter the totals when answers come back.</p></div>
         <div><span class="num">3</span><h3>Get a clear answer</h3><p>See break-even, cash needed up front and worst case, plus a summary you can read to the board.</p></div>
       </section>
@@ -589,7 +673,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       <section class="panel">${renderSummary(all)}</section>
       ${state.options.length > 1 ? `<section class="panel"><h2>Side by side</h2>${renderComparison(all)}</section>` : ''}
       <section class="panel"><h2>Before anyone signs</h2><p class="hint">These can change the decision but can't be calculated. Get answers in writing.</p><ul class="plain miss">${SIGNING_QUESTIONS.map((q) => `<li>${esc(q)}</li>`).join('')}</ul>
-        <details class="qs"><summary>Questions to ask the course or venue</summary><ul class="plain">${COURSE_QUESTIONS.map((q) => `<li>${esc(q)}</li>`).join('')}</ul></details></section>
+        ${state.options.map((o) => `<details class="qs"><summary>Questions to ask the ${esc(T(o).venue)}: ${esc(o.name)}</summary><ul class="plain">${questionsFor(o).map((q) => `<li>${esc(q)}</li>`).join('')}</ul></details>`).join('')}</section>
       <section class="panel"><h2>Detailed numbers</h2><p class="hint">Every line of the math for each scenario, a chart of profit at each headcount, and which assumption matters most.</p>${state.options.map((o, i) => renderDetail(o, all[i])).join('')}</section>
     </div>`;
   }
@@ -676,7 +760,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     else if (a === 'copy-memo') return copyText(boardMemo(), b);
     else if (a === 'nav') return go(b.dataset.to);
     else if (a === 'opt-step') { openOption = i; render(true); window.scrollTo(0, 0); return; }
-    else if (a === 'start-demo') { if (hasSavedPlan() && !armed(b, 'This replaces your saved plan. Click again')) return; state = clone(window.BFDemo.DEMO_STATE); openOption = 0; touched = true; return go('step-event'); }
+    else if (a === 'start-demo') { if (hasSavedPlan() && !armed(b, 'This replaces your saved plan. Click again')) return; state = clone(b.dataset.demo === 'gala' ? window.BFDemo.DEMO_GALA : window.BFDemo.DEMO_STATE); openOption = 0; touched = true; return go('step-event'); }
     else if (a === 'toggle-save') { savePanel = !savePanel; }
     else if (a === 'toggle-exact') { exact = !exact; }
     else if (a === 'csv-template') return showText('Survey summary CSV template', 'summary-template.csv', 'metric,option_id,value\nsurvey_responses,,0\n' + state.options.map((o) => ['named_high_intent', 'definitely_at_price', 'probably_at_price', 'paid_registrations'].map((m) => `${m},${o.id},0`).join('\n')).join('\n') + '\n', 'text/csv');
@@ -711,7 +795,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       try {
         const s = JSON.parse(t);
         if (!s || !Array.isArray(s.options) || !s.scenarioSettings) throw new Error('Missing options or scenario settings.');
-        state = s; openOption = 0; touched = true; render(); say('Plan imported.');
+        state = migrate(s); openOption = 0; touched = true; render(); say('Plan imported.');
       } catch (err) { say('Could not import that file: ' + err.message); }
     });
   }
@@ -752,7 +836,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     const xh = fig.querySelector('.xh'); xh.setAttribute('x1', px); xh.setAttribute('x2', px); xh.setAttribute('visibility', 'visible');
     const tip = fig.querySelector('.tip');
     tip.hidden = false;
-    tip.innerHTML = `<b>${best.participants}</b> participants<br>net <b>${money(best.net)}</b>`;
+    tip.innerHTML = `<b>${best.participants}</b> ${esc(fig.dataset.unit || 'people')}<br>net <b>${money(best.net)}</b>`;
     const left = (px / W) * rect.width;
     tip.style.left = Math.min(Math.max(left - 60, 0), rect.width - 130) + 'px';
   }

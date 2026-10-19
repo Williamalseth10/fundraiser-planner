@@ -274,3 +274,35 @@ test('decision lists missing cancellation terms until entered', () => {
   o.cancellationOwed = 0;
   assert.ok(!E.decide(st, o).missing.some((m) => /owe if you cancel/.test(m)));
 });
+
+test('group pricing works for any group size (a table of 8 at a gala)', () => {
+  const o = { ...base(), groupSize: 8, wholeGroupsOnly: false, price: 100, groupPrice: 700, groupShare: 0.5 };
+  const r = E.project(o, 40, ctx()); // 20 buy as tables -> 2 tables of 8 (16), 24 single tickets
+  assert.equal(r.revenue.groups, 2);
+  assert.equal(r.revenue.registration, 2 * 700 + 24 * 100);
+  const none = E.project({ ...o, groupSize: 1 }, 40, ctx());
+  assert.equal(none.revenue.registration, 4000);
+});
+
+test('older plans with foursomePrice still compute the same', () => {
+  const oldStyle = { ...base(), foursomePrice: 500, foursomeShare: 0.5 };
+  const newStyle = { ...base(), groupPrice: 500, groupShare: 0.5 };
+  assert.equal(E.project(oldStyle, 40, ctx()).net, E.project(newStyle, 40, ctx()).net);
+});
+
+test('per-option scenario proceeds (auction/raffle) are the organizer figure, added only to that option', () => {
+  const o = { ...base(), id: 'auc', scenarioProceeds: { conservative: 1000, middle: 2500 }, scenarioParticipants: { conservative: 0, middle: 0 } };
+  const st = { sponsorships: [], scenarioSettings: { conservative: { otherRevenue: 50 }, middle: {} }, evidence: {} };
+  assert.equal(E.project(o, 0, E.scenarioContext(st, o, 'conservative')).revenue.other, 1050);
+  assert.equal(E.project(o, 0, E.scenarioContext(st, o, 'middle')).revenue.other, 2500);
+  assert.equal(E.project(o, 0, E.scenarioContext(st, o, 'optimistic')).revenue.other, 0);
+});
+
+test('break-even leaves out auction and raffle estimates (bids are not promised)', () => {
+  const o = { ...base(), id: 'auc', scenarioParticipants: { conservative: 24 }, scenarioProceeds: { conservative: 100000 } };
+  const st = { settings: {}, sponsorships: [], evidence: {}, scenarioSettings: {} };
+  const d = E.decide(st, o);
+  assert.equal(d.breakEven.participants, 8); // same as with no auction at all
+  assert.equal(d.proceedsLow, 100000);
+  assert.ok(d.conservative.net > 100000 - 1000); // the scenario itself still includes the organizer's figure
+});
