@@ -100,26 +100,28 @@
   const Q_VENUE = [
     'What does the per-guest price include (food, drinks, staff, setup, cleanup)?',
     'Is there a minimum guest count or a food-and-drink minimum? Is it binding if we fall short?',
-    'When is the final headcount due, and can it go down after that?',
-    'Are tables, chairs, linens, AV and decorations included or extra?',
+    'When is the final headcount due, and can it go down after that? Do complimentary or sponsor guests count toward the food minimum even though they paid no ticket?',
+    'Are tables, chairs, linens, AV and decorations included or extra? If we bring our own AV or entertainment, does the venue require its own vendor or add a fee? What do we owe if we run past the contracted end time?',
     'Can we bring outside food, drinks, decorations or entertainment? Is alcohol allowed, and who must serve it?',
   ];
   const Q_PARTICIPATION = [
     'What permits are needed (city, park, police, road closures), and what do they cost?',
-    'Is there a minimum number of entries or a minimum total for timing, shirts or medals?',
+    'Which bills are separate (park or venue, timing, shirts, medals)? Which have a minimum, and which orders can\'t be cut or returned after a certain date?',
     'When must shirt sizes and quantities be ordered, and are unused ones refundable?',
-    'Weather: who decides to cancel, and is there a rain date?',
+    'Weather: who decides to cancel, and is there a rain date? If we cancel, what do we still owe, and will we refund people who already paid?',
   ];
   const Q_SUPPLIER = [
-    'What is the price per item, including tax and shipping? Does it drop at higher quantities?',
+    'What do we pay the supplier per item, including tax and shipping? That is our cost, not the retail price. Does it drop at higher quantities, and is profit on online sales figured differently from order-form sales?',
     'Is there a minimum order? Do we order before or after we collect sellers\' orders?',
-    'Can unsold items be returned? Who pays for them if they don\'t sell?',
+    'Do orders ship to each buyer, or does the group receive them and hand them out? Can unsold items be returned, and who pays for the ones that don\'t sell?',
+    'If the company offers a profit calculator or an "average items per seller", don\'t plan on it. Use counts from your own supporters.',
     'When do we have to pay the supplier, and when does the product arrive?',
     'Who collects the money from sellers, and how are missing payments handled?',
   ];
   const Q_AUCTION = [
     'Raffles: has the club confirmed it is allowed to run a raffle of this size under state rules?',
-    'Auction items: by what date must donations be in hand, and who tracks their value?',
+    'Auction items and any paddle raise: by what date are gifts promised in writing, and who keeps that list? A hoped-for bid is not firm money.',
+    'Does an auctioneer or the bidding software charge a flat fee, a percentage of winning bids, or both?',
     'How will winners pay (card fees, checks), and what happens to unsold items?',
     'Is there a minimum guest count or food-and-drink minimum at the venue?',
   ];
@@ -129,7 +131,7 @@
     golf_shotgun: golfType('Golf: shotgun start'),
     participation: { label: 'Run, walk, tournament or other sign-up event', group: 'Participation events', one: 'participant', many: 'participants', venue: 'venue', groupName: 'team', survey: 'join', perHint: 'shirts, bibs, medals, timing per person', fixedHint: 'permits, course setup, awards, insurance', questions: Q_PARTICIPATION },
     ticketed: { label: 'Dinner, gala, trivia night or other ticketed event', group: 'Ticketed events', one: 'guest', many: 'guests', venue: 'venue', groupName: 'table', survey: 'attend', perHint: 'food and drinks per guest, favors', fixedHint: 'venue rental, decorations, entertainment, AV, insurance', questions: Q_VENUE },
-    auction: { label: 'Auction or raffle night', group: 'Auctions & raffles', one: 'guest', many: 'guests', venue: 'venue', groupName: 'table', survey: 'attend', proceeds: true, perHint: 'food and drinks per guest', fixedHint: 'venue rental, bid sheets or auction software, raffle prizes you buy, decorations', questions: Q_AUCTION.concat(Q_VENUE.slice(0, 2)) },
+    auction: { label: 'Auction or raffle night', group: 'Auctions & raffles', one: 'guest', many: 'guests', venue: 'venue', groupName: 'table', survey: 'attend', proceeds: true, perHint: 'food and drinks per guest', fixedHint: 'venue rental, bid sheets or auction software, raffle prizes you buy, decorations', questions: Q_AUCTION.concat(Q_VENUE) },
     product: { label: 'Product sale (cookie dough, wreaths, discount cards, spirit gear)', group: 'Product sales', one: 'item', many: 'items', venue: 'supplier', groupName: null, survey: 'buy', perHint: 'packaging or shipping per item not in the supplier price', fixedHint: 'order forms, delivery, storage, seller prizes', questions: Q_SUPPLIER },
     generic: { label: 'Other kind of event', group: 'Other', one: 'person', many: 'people', venue: 'venue', groupName: 'group', survey: 'attend', perHint: 'anything you pay per person', fixedHint: 'rental, supplies, printing, insurance', questions: Q_VENUE },
   };
@@ -243,9 +245,9 @@
           ${t.proceeds ? num(`${p}.scenarioProceeds.${k}`, 'Auction and raffle money you would count on ($)') : ''}</div>`).join('')}
       </div>
       ${t.proceeds ? '<p class="hint">Auction and raffle money is your own figure for each case. It is counted in the low, likely and high totals but <b>not</b> in break-even, because donated items don\'t guarantee bids. Keep the low case low, and don\'t enter the same raffle money again under “Adjust assumptions”.</p>' : ''}
-      <details class="qs"><summary>Adjust assumptions (sponsors counted, raffle income, cost cushion)</summary>
+      <details class="qs"><summary>Adjust assumptions (sponsors counted, priced add-ons, cost cushion)</summary>
         <div class="table-wrap"><table class="edit">
-          <thead><tr><th></th><th>Sponsors counted</th><th>Extra income per ${esc(t.one)} ($)<br><span class="muted">${t.proceeds ? 'drink tickets, games (not auction or raffle money)' : 'raffle tickets, add-ons, mulligans'}</span></th><th>Other income ($)</th><th>Cost cushion %<br><span class="muted">not on the venue quote</span></th></tr></thead>
+          <thead><tr><th></th><th>Sponsors counted</th><th>Extra income per ${esc(t.one)} ($)<br><span class="muted">${t.proceeds ? 'drink tickets, games (not auction or raffle money)' : 'add-ons already priced, such as mulligans. Not raffle tickets, auction bids or a paddle raise'}</span></th><th>Other income ($)</th><th>Cost cushion %<br><span class="muted">not on the venue quote</span></th></tr></thead>
           <tbody>${SC.map((k) => `<tr><td><b>${esc(ss[k].label)}</b></td><td>${statusBoxes(k)}</td>
             <td><input type="number" inputmode="decimal" step="any" min="0" data-path="scenarioSettings.${k}.extraRevenuePerParticipant" data-type="number" value="${esc(ss[k].extraRevenuePerParticipant)}" aria-label="${esc(ss[k].label)} extra income per person"></td>
             <td><input type="number" inputmode="decimal" step="any" min="0" data-path="scenarioSettings.${k}.otherRevenue" data-type="number" value="${esc(ss[k].otherRevenue)}" aria-label="${esc(ss[k].label)} other income"></td>
