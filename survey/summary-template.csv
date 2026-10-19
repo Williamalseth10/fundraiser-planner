@@ -1,0 +1,14 @@
+metric,option_id,value
+survey_responses,,0
+paid_registrations,tee,0
+named_high_intent,tee,0
+definitely_at_price,tee,0
+probably_at_price,tee,0
+paid_registrations,shotgun,0
+named_high_intent,shotgun,0
+definitely_at_price,shotgun,0
+probably_at_price,shotgun,0
+paid_registrations,alt,0
+named_high_intent,alt,0
+definitely_at_price,alt,0
+probably_at_price,alt,0
