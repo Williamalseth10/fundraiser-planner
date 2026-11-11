@@ -13,6 +13,9 @@
   const SPONSOR_STATUSES = ['collected', 'committed', 'hoped'];
 
   const c = (dollars) => Math.round((Number(dollars) || 0) * 100); // to cents
+  // Money the organizer enters (prices, quotes, costs, sponsorship, assumptions). A negative or non-numeric
+  // entry is treated as 0: it can never become income, a refund or a negative cost.
+  const ci = (dollars) => c(Math.max(0, Number(dollars) || 0));
   const d = (cents) => Math.round(cents) / 100;                    // to dollars
   const nonNeg = (x) => Math.max(0, Number(x) || 0);
   const int = (x) => Math.max(0, Math.floor(Number(x) || 0));
@@ -71,20 +74,20 @@
   function venueBillCents(option, n) {
     const q = option.venueQuote || {};
     const billedHeads = Math.max(n, int(q.minimumParticipants));
-    let bill = c(q.flatFee) + c(q.perParticipant) * billedHeads;
-    bill = Math.max(bill, c(q.minimumSpend));
+    let bill = ci(q.flatFee) + ci(q.perParticipant) * billedHeads;
+    bill = Math.max(bill, ci(q.minimumSpend));
     const dep = option.deposit || {};
-    const depC = c(dep.amount);
+    const depC = ci(dep.amount);
     if (depC > 0 && dep.creditedTowardBill && !dep.refundable) bill = Math.max(bill, depC);
-    const unminimized = c(q.flatFee) + c(q.perParticipant) * n;
+    const unminimized = ci(q.flatFee) + ci(q.perParticipant) * n;
     return { bill, billedHeads, minimumApplied: bill > unminimized };
   }
 
   /** Separate (not credited) deposit fee, in cents. Refundable non-credited deposits are not an expense. */
   function separateDepositFeeCents(option) {
     const dep = option.deposit || {};
-    if (!c(dep.amount) || dep.creditedTowardBill || dep.refundable) return 0;
-    return c(dep.amount);
+    if (!ci(dep.amount) || dep.creditedTowardBill || dep.refundable) return 0;
+    return ci(dep.amount);
   }
 
   /**
@@ -92,7 +95,7 @@
    * replaces (replacesCostId), capped at that cost line. Anything else is shown but never counted as cash.
    */
   function applyInKind(option, sponsorships, statuses) {
-    const lines = (option.fixedCosts || []).map((l) => ({ ...l, cents: c(l.amount), reducedBy: 0 }));
+    const lines = (option.fixedCosts || []).map((l) => ({ ...l, cents: ci(l.amount), reducedBy: 0 }));
     const applied = [];
     const notCounted = [];
     for (const s of sponsorships || []) {
@@ -103,9 +106,9 @@
       if (!counted) { notCounted.push({ id: s.id, label: s.label, reason: 'status_not_counted_in_this_scenario' }); continue; }
       if (!target) { notCounted.push({ id: s.id, label: s.label, reason: 'does_not_replace_a_budgeted_cost' }); continue; }
       const room = target.cents - target.reducedBy;
-      const use = Math.min(room, c(s.amount));
+      const use = Math.min(room, ci(s.amount));
       target.reducedBy += use;
-      applied.push({ id: s.id, label: s.label, replaces: target.label, reducedBy: d(use), excessNotCounted: d(c(s.amount) - use) });
+      applied.push({ id: s.id, label: s.label, replaces: target.label, reducedBy: d(use), excessNotCounted: d(ci(s.amount) - use) });
     }
     return { lines, applied, notCounted };
   }
@@ -116,7 +119,7 @@
       if (s.type === 'inKind') continue;
       if (s.optionId && s.optionId !== option.id) continue;
       if (byStatus[s.status] === undefined) continue;
-      byStatus[s.status] += c(s.amount);
+      byStatus[s.status] += ci(s.amount);
     }
     const counted = statuses.reduce((sum, st) => sum + (byStatus[st] || 0), 0);
     return { counted, byStatus };
@@ -130,12 +133,12 @@
    * Older plans used foursomePrice / foursomeShare; those are still read.
    */
   function registrationCents(option, n) {
-    const indiv = c(option.price);
+    const indiv = ci(option.price);
     const size = Math.max(1, int(option.groupSize) || 1);
     const gpRaw = option.groupPrice !== undefined ? option.groupPrice : option.foursomePrice;
     const shareRaw = option.groupShare !== undefined ? option.groupShare : option.foursomeShare;
     if (size < 2) return { total: indiv * n, groups: 0, singles: n, foursomes: 0 };
-    const gp = gpRaw == null || gpRaw === '' ? indiv * size : c(gpRaw);
+    const gp = gpRaw == null || gpRaw === '' ? indiv * size : ci(gpRaw);
     const share = Math.min(1, nonNeg(shareRaw));
     const groups = Math.floor((n * share) / size);
     const singles = n - groups * size;
@@ -157,15 +160,15 @@
     const paidSoFar = int(ctx.paidRegistrations);
     const paidCashKnown = paidSoFar > 0 && ctx.paidRegistrationCash != null && ctx.paidRegistrationCash !== '';
     const reg = paidCashKnown ? registrationCents(option, Math.max(0, n - paidSoFar)) : registrationCents(option, n);
-    const registration = (paidCashKnown ? c(nonNeg(ctx.paidRegistrationCash)) : 0) + reg.total;
+    const registration = (paidCashKnown ? ci(ctx.paidRegistrationCash) : 0) + reg.total;
     if (paidCashKnown && n < paidSoFar) norm.flags.push('fewer_than_already_paid');
-    const extras = c(ctx.extraRevenuePerParticipant) * n;
-    const other = c(ctx.otherRevenue);
+    const extras = ci(ctx.extraRevenuePerParticipant) * n;
+    const other = ci(ctx.otherRevenue);
     const sp = sponsorshipCashCents(option, ctx.sponsorships, statuses);
     const revenue = registration + extras + other + sp.counted;
 
     const venue = venueBillCents(option, n);
-    const perHeadRate = (option.perParticipantCosts || []).reduce((s, l) => s + c(l.amount), 0);
+    const perHeadRate = (option.perParticipantCosts || []).reduce((s, l) => s + ci(l.amount), 0);
     const perHead = perHeadRate * n;
     const ik = applyInKind(option, ctx.sponsorships, statuses);
     const fixed = ik.lines.reduce((s, l) => s + (l.cents - l.reducedBy), 0);
@@ -177,7 +180,7 @@
     const net = revenue - expenses;
 
     // Upfront cash: what must be paid before the event, vs. cash actually in hand now.
-    const dep = c((option.deposit || {}).amount);
+    const dep = ci((option.deposit || {}).amount);
     const upfrontFixed = ik.lines.filter((l) => l.paidUpfront).reduce((s, l) => s + (l.cents - l.reducedBy), 0);
     const upfront = dep + upfrontFixed;
     // Cash in hand = collected sponsorship + registration money actually received (entered by the organizer).
@@ -185,7 +188,7 @@
     // If people have paid but the amount isn't entered, their money is left out and flagged, so the gap errs high.
     const paidRegs = int(ctx.paidRegistrations);
     const cashKnown = ctx.paidRegistrationCash != null && ctx.paidRegistrationCash !== '';
-    const regCash = cashKnown ? c(nonNeg(ctx.paidRegistrationCash)) : 0;
+    const regCash = cashKnown ? ci(ctx.paidRegistrationCash) : 0;
     const inHand = sp.byStatus.collected + regCash;
 
     return {
@@ -219,11 +222,11 @@
     const counts = possibleCounts(option, ctx);
     const goal = c(target);
     let found = null;
-    let dipsAfter = false;
+    let dipsAt = null;
     for (const n of counts) {
       const net = c(project(option, n, ctx).net);
       if (found === null && net >= goal) found = n;
-      else if (found !== null && net < goal) { dipsAfter = true; break; }
+      else if (found !== null && net < goal) { dipsAt = n; break; }
     }
     const atCapacity = project(option, maxFeasible(option), ctx);
     return {
@@ -232,7 +235,8 @@
       reachableWithinCapacity: found !== null,
       maxFeasible: maxFeasible(option),
       netAtCapacity: atCapacity.net,
-      nonMonotonic: dipsAfter,
+      nonMonotonic: dipsAt !== null,
+      dipsAt, // first feasible count above `participants` where net falls below the target again (null if never)
     };
   }
 
@@ -286,7 +290,7 @@
     if (option.cancellationOwed == null || option.cancellationOwed === '') return null;
     const ik = applyInKind(option, sponsorships, ['collected']);
     const spent = ik.lines.filter((l) => l.paidUpfront).reduce((s, l) => s + (l.cents - l.reducedBy), 0);
-    const owed = c(option.cancellationOwed);
+    const owed = ci(option.cancellationOwed);
     return { owedToVenue: d(owed), alreadySpent: d(spent), total: d(owed + spent) };
   }
 
@@ -401,15 +405,21 @@
     if (paid > 0 && consCtx.paidRegistrationCash == null) missing.push('People have paid, but the amount actually received is not entered, so it is left out of cash in hand.');
     if (firm.upfront.gap > 0 && !option.upfrontFundingConfirmed) missing.push(`You'd need $${firm.upfront.gap.toLocaleString('en-US')} more cash before the event than you have now (deposit and bills due in advance). Confirm how the club will cover it.`);
     if (option.cancellationOwed == null || option.cancellationOwed === '') missing.push('What you would owe if you cancel after the deadline on the quote has not been entered.');
+    if (paid > maxFeasible(option)) missing.push(`${paid} people or items are already paid for, but the capacity entered is ${maxFeasible(option)}. Check the capacity and the paid count.`);
     if (state.volunteerHoursAvailable == null || state.volunteerHoursAvailable === '') missing.push('Volunteer hours actually available are unknown.');
     else if (nonNeg(option.volunteerHours) > nonNeg(state.volunteerHoursAvailable)) missing.push(`Estimated volunteer need (${nonNeg(option.volunteerHours)} h) exceeds hours available (${nonNeg(state.volunteerHoursAvailable)} h).`);
 
+    const worst = worstCase(option, state.sponsorships);
+    const cancel = cancellationExposure(option, state.sponsorships);
     const reasons = [];
     let status;
     const assumedWords = (u) => u.join(', ').replace(/, ([^,]*)$/, ' and $1');
+    // Selling one more costs more than it brings in (e.g. free admission with a per-guest charge).
+    const perUnitCost = ci((option.venueQuote || {}).perParticipant) + (option.perParticipantCosts || []).reduce((s, l) => s + ci(l.amount), 0);
+    const losesPerExtra = ci(option.price) < perUnitCost;
     if (!be.reachableWithinCapacity && conditional && conditional.reachableWithinCapacity) {
       status = 'high_risk';
-      reasons.push(`Tickets and firm sponsorship can't cover costs even at full capacity (${be.maxFeasible}). It works only if your low-case ${assumedWords(conditional.uses)} come in, with ${conditional.participants} paying. Those are assumptions, not commitments.`);
+      reasons.push(`Tickets and firm sponsorship can't cover costs even at full capacity (${be.maxFeasible}). It works only if your low-case estimates for ${assumedWords(conditional.uses)} actually arrive${conditional.participants > 0 ? `, with at least ${conditional.participants} paying` : ''}. Those are assumptions, not commitments.`);
     } else if (!be.reachableWithinCapacity) {
       status = 'not_viable_as_configured';
       reasons.push(`Even at full capacity (${be.maxFeasible}) the event loses $${Math.abs(be.netAtCapacity).toFixed(2)} with only collected/committed sponsorship${conditional ? `, and your low-case ${assumedWords(conditional.uses)} don't close the gap` : ''}.`);
@@ -421,21 +431,34 @@
       reasons.push(`Break-even needs ${be.participants} participants; paid registrations (${paid}) plus named “yes” answers for the current offer (${namedCounted}) total ${paid + namedCounted}.${named > namedCounted ? ` ${named} named answers aren't counted because they were for different or unrecorded terms.` : ''} Anonymous “yes” answers (${definitely}) are shown but not counted toward this check.`);
     } else if (be.nonMonotonic) {
       status = 'high_risk';
-      reasons.push(`Net drops below zero again at a higher headcount than break-even (${be.participants}), usually because of group pricing or a minimum. Check the chart before relying on a single break-even number.`);
+      reasons.push(`Costs are covered at ${be.participants}, but money left falls below zero again at ${be.dipsAt}${losesPerExtra ? `: each extra ${option.kind === 'product' ? 'item' : 'person'} costs more than they pay (price $${d(ci(option.price)).toFixed(2)}, cost $${d(perUnitCost).toFixed(2)} each)` : ', because of group pricing or a minimum'}. Check the chart before relying on a single break-even number.`);
     } else if (cons.net < 0) {
       status = 'high_risk';
       reasons.push(`The conservative scenario loses $${Math.abs(cons.net).toFixed(2)}.`);
+    } else if (firm.net < 0) {
+      // The low case only looks positive because of assumed add-ons, other income or auction money.
+      status = 'high_risk';
+      reasons.push(`At your low number (${firm.participants}), firm money alone loses $${Math.abs(firm.net).toFixed(2)}. The low case shows $${cons.net.toFixed(2)} only because it counts your assumed ${assumedWords(uses)}, which nobody has promised.`);
     } else {
       status = missing.length ? 'supported_with_open_items' : 'supported_by_current_evidence';
       reasons.push(`The break-even headcount (${be.participants}) is at or below paid registrations plus named “yes” answers (${paid + namedCounted}). Named answers are not revenue. Using the conservative turnout you entered, that scenario nets $${cons.net.toFixed(2)}. This is not a prediction.`);
-      if (missing.length) reasons.push(`${missing.length} item${missing.length > 1 ? 's' : ''} below still need checking before anyone signs.`);
+      if (missing.length) reasons.push(`${missing.length} item${missing.length > 1 ? 's below still need' : ' below still needs'} checking before anyone signs.`);
     }
     if (be.reachableWithinCapacity && conditional && conditional.participants !== be.participants) reasons.push(`With your low-case ${assumedWords(conditional.uses)}, break-even would be ${conditional.participants}${conditional.reachableWithinCapacity ? '' : ' (not reachable)'}. That depends on assumptions, so the firm number above is the one to rely on.`);
     if (target > 0 && !tg.reachableWithinCapacity) reasons.push(`The $${target.toLocaleString('en-US')} target is not reachable even at full capacity with only collected/committed sponsorship (max ≈ $${Math.round(tg.netAtCapacity).toLocaleString('en-US')}).`);
 
+    // The plain answers to "how much cash do we need first?" and "how much could we lose?", under the terms entered.
+    const lossIfNobodyComes = Math.max(0, -worst.netIfNobodyRegisters);
+    const lossIfCanceled = cancel ? cancel.total : null;
+    const exposure = {
+      cashNeededBeforeEvent: firm.upfront.required, cashInHand: firm.upfront.cashInHand, shortBeforeEvent: firm.upfront.gap,
+      lossIfNobodyComes, lossIfCanceled, cancellationKnown: !!cancel,
+      largestLoss: Math.max(lossIfNobodyComes, lossIfCanceled || 0),
+    };
+
     return {
-      status, reasons, missing, breakEven: be, targetNeeded: tg, conservative: cons, firm, paid, named, namedCounted, definitely, responses, evidence,
-      worst: worstCase(option, state.sponsorships), cancel: cancellationExposure(option, state.sponsorships), proceedsLow, conditional,
+      status, reasons, missing, exposure, breakEven: be, targetNeeded: tg, conservative: cons, firm, paid, named, namedCounted, definitely, responses, evidence,
+      worst, cancel, proceedsLow, conditional,
       beWithLowProceeds: conditional, // kept for older callers
     };
   }
