@@ -19,6 +19,8 @@
   const d = (cents) => Math.round(cents) / 100;                    // to dollars
   const nonNeg = (x) => Math.max(0, Number(x) || 0);
   const int = (x) => Math.max(0, Math.floor(Number(x) || 0));
+  // Dollars for sentences shown to people: $2,740.00 (same thousands separator as the rest of the page).
+  const usd = (x) => '$' + (Number(x) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   /** Step between feasible participant counts (1, or group size when whole groups are required). */
   function participantStep(option) {
@@ -422,7 +424,7 @@
       reasons.push(`Tickets and firm sponsorship can't cover costs even at full capacity (${be.maxFeasible}). It works only if your low-case estimates for ${assumedWords(conditional.uses)} actually arrive${conditional.participants > 0 ? `, with at least ${conditional.participants} paying` : ''}. Those are assumptions, not commitments.`);
     } else if (!be.reachableWithinCapacity) {
       status = 'not_viable_as_configured';
-      reasons.push(`Even at full capacity (${be.maxFeasible}) the event loses $${Math.abs(be.netAtCapacity).toFixed(2)} with only collected/committed sponsorship${conditional ? `, and your low-case ${assumedWords(conditional.uses)} don't close the gap` : ''}.`);
+      reasons.push(`Even at full capacity (${be.maxFeasible}) the event loses ${usd(Math.abs(be.netAtCapacity))} with only collected/committed sponsorship${conditional ? `, and your low-case ${assumedWords(conditional.uses)} don't close the gap` : ''}.`);
     } else if (!option.quoteVerified || (responses === 0 && paid === 0)) {
       status = 'not_enough_evidence';
       reasons.push('Key costs or demand have not been checked against real quotes or real supporter responses.');
@@ -431,17 +433,17 @@
       reasons.push(`Break-even needs ${be.participants} participants; paid registrations (${paid}) plus named “yes” answers for the current offer (${namedCounted}) total ${paid + namedCounted}.${named > namedCounted ? ` ${named} named answers aren't counted because they were for different or unrecorded terms.` : ''} Anonymous “yes” answers (${definitely}) are shown but not counted toward this check.`);
     } else if (be.nonMonotonic) {
       status = 'high_risk';
-      reasons.push(`Costs are covered at ${be.participants}, but money left falls below zero again at ${be.dipsAt}${losesPerExtra ? `: each extra ${option.kind === 'product' ? 'item' : 'person'} costs more than they pay (price $${d(ci(option.price)).toFixed(2)}, cost $${d(perUnitCost).toFixed(2)} each)` : ', because of group pricing or a minimum'}. Check the chart before relying on a single break-even number.`);
+      reasons.push(`Costs are covered at ${be.participants}, but money left falls below zero again at ${be.dipsAt}${losesPerExtra ? `: each extra ${option.kind === 'product' ? 'item' : 'person'} costs more than they pay (price ${usd(d(ci(option.price)))}, cost ${usd(d(perUnitCost))} each)` : ', because of group pricing or a minimum'}. Check the chart before relying on a single break-even number.`);
     } else if (cons.net < 0) {
       status = 'high_risk';
-      reasons.push(`The conservative scenario loses $${Math.abs(cons.net).toFixed(2)}.`);
+      reasons.push(`The conservative scenario loses ${usd(Math.abs(cons.net))}.`);
     } else if (firm.net < 0) {
       // The low case only looks positive because of assumed add-ons, other income or auction money.
       status = 'high_risk';
-      reasons.push(`At your low number (${firm.participants}), firm money alone loses $${Math.abs(firm.net).toFixed(2)}. The low case shows $${cons.net.toFixed(2)} only because it counts your assumed ${assumedWords(uses)}, which nobody has promised.`);
+      reasons.push(`At your low number (${firm.participants}), firm money alone loses ${usd(Math.abs(firm.net))}. The low case shows ${usd(cons.net)} only because it counts your assumed ${assumedWords(uses)}, which nobody has promised.`);
     } else {
       status = missing.length ? 'supported_with_open_items' : 'supported_by_current_evidence';
-      reasons.push(`The break-even headcount (${be.participants}) is at or below paid registrations plus named “yes” answers (${paid + namedCounted}). Named answers are not revenue. Using the conservative turnout you entered, that scenario nets $${cons.net.toFixed(2)}. This is not a prediction.`);
+      reasons.push(`The break-even headcount (${be.participants}) is at or below paid registrations plus named “yes” answers (${paid + namedCounted}). Named answers are not revenue. Using the conservative turnout you entered, that scenario nets ${usd(cons.net)}. This is not a prediction.`);
       if (missing.length) reasons.push(`${missing.length} item${missing.length > 1 ? 's below still need' : ' below still needs'} checking before anyone signs.`);
     }
     if (be.reachableWithinCapacity && conditional && conditional.participants !== be.participants) reasons.push(`With your low-case ${assumedWords(conditional.uses)}, break-even would be ${conditional.participants}${conditional.reachableWithinCapacity ? '' : ' (not reachable)'}. That depends on assumptions, so the firm number above is the one to rely on.`);
