@@ -17,8 +17,9 @@ jobs:
 
   # Browser checks: the full volunteer journey, import safety, keyboard access and layout at phone width.
   # Runs on GitHub's standard free runner; no paid services. Playwright is pinned so results are repeatable.
+  # The runner is pinned too: ubuntu-latest moved to 26.04, where Playwright 1.56 can't install Chromium.
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
