@@ -2082,7 +2082,8 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   document.addEventListener('click', onClick);
   // Printing: open every collapsed detail section so the printout is complete, then put them back.
   let printOpened = [];
-  window.addEventListener('beforeprint', () => { printOpened = [...document.querySelectorAll('#app details:not([open])')]; printOpened.forEach((el) => { el.open = true; }); });
+  // Add to the list rather than replace it: if a second beforeprint arrives first, the first one's sections still close.
+  window.addEventListener('beforeprint', () => { const closed = [...document.querySelectorAll('#app details:not([open])')]; closed.forEach((el) => { el.open = true; }); printOpened = printOpened.concat(closed); });
   window.addEventListener('afterprint', () => { printOpened.forEach((el) => { el.open = false; }); printOpened = []; });
   document.addEventListener('pointermove', onMove);
   // Moving to another page clears an old status message (but not one set by the click that caused the move).
