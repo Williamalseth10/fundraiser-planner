@@ -183,6 +183,22 @@ with sync_playwright() as p:
     check('unreadable saved plan is kept aside after new typing', p3.evaluate("localStorage.getItem('bfp-plan-v1-unreadable')") == '{not json')
     c3.close()
 
+    # ---- examples never push a real plan out of the backup; opening a panel isn't an edit ----
+    c4 = b.new_context(); p4 = c4.new_page(); p4.goto(URL)
+    p4.click('[data-action="toggle-save"]'); p4.wait_for_timeout(60)
+    check('opening Save & backup on a fresh page saves nothing', p4.evaluate("localStorage.getItem('bfp-plan-v1')") is None)
+    p4.click('[data-action="toggle-save"]')
+    p4.click('#app [data-action="start-blank"]'); p4.wait_for_timeout(60)
+    p4.fill('[data-path="eventName"]', 'Real plan'); p4.press('[data-path="eventName"]', 'Tab'); p4.wait_for_timeout(80)
+    p4.click('[data-action="toggle-save"]'); p4.wait_for_timeout(40)
+    p4.click('#save-panel [data-action="load-demo"]'); p4.click('#save-panel [data-action="load-demo"]'); p4.wait_for_timeout(80)
+    practice = pathlib.Path(__file__).resolve().parent.parent / 'docs' / 'practice-plan-fictional.json'
+    p4.click('[data-action="toggle-save"]'); p4.wait_for_timeout(40)
+    p4.set_input_files('input[data-action="import-json"]', str(practice)); p4.wait_for_timeout(200)
+    check('the fictional practice file opens', 'Plan imported' in p4.inner_text('#status') and 'Practice file' in p4.evaluate("JSON.parse(localStorage.getItem('bfp-plan-v1')).eventName"))
+    check('example then file: the backup is still the real plan', p4.evaluate("JSON.parse(localStorage.getItem('bfp-plan-v1-backup')).eventName") == 'Real plan')
+    c4.close()
+
     # ---- widths and dark mode: no sideways scrolling on any page ----
     for w, scheme in [(375, 'light'), (768, 'dark'), (1280, 'dark')]:
         c2 = b.new_context(viewport={'width': w, 'height': 900}, color_scheme=scheme); p2 = c2.new_page()

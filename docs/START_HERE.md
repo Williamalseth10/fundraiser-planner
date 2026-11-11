@@ -55,6 +55,8 @@ Answer one step at a time. Each money box has a short explanation underneath it.
 
 Download a fresh backup file whenever you've made changes you'd hate to lose.
 
+**Practice opening a file:** the file `practice-plan-fictional.json` (made-up numbers) came with this guide. Choose **Save & backup → Open a backup file** and pick it. A gala and a cookie dough sale appear, marked as made up. Then use **Restore previous plan** to go back to what you had.
+
 ## 5. Reading the results
 | Status | What it means |
 |---|---|

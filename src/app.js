@@ -42,10 +42,14 @@
   }
   state = migrate(state);
   // Before an example, a blank plan or an import replaces the plan, keep the saved one as a backup (one level).
-  function backupSaved() {
+  // An example (isDemo) never overwrites a backup of a real plan; it may fill an empty backup or replace another example.
+  const isDemoText = (raw) => { try { return !!JSON.parse(raw).isDemo; } catch (e) { return false; } };
+  function backupSaved(prevRaw) {
     try {
-      const prev = localStorage.getItem(SAVE_KEY);
+      const prev = prevRaw !== undefined ? prevRaw : localStorage.getItem(SAVE_KEY);
       if (!prev) return false;
+      const existing = localStorage.getItem(SAVE_KEY + '-backup');
+      if (isDemoText(prev) && existing && !isDemoText(existing)) return false;
       localStorage.setItem(SAVE_KEY + '-backup', prev);
       localStorage.setItem(SAVE_KEY + '-backup-at', new Date().toISOString());
       return true;
@@ -974,15 +978,15 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     else if (a === 'copy-memo') return copyText(boardMemo(), b);
     else if (a === 'nav') return go(b.dataset.to);
     else if (a === 'opt-step') { openOption = i; render(true); window.scrollTo(0, 0); return; }
-    else if (a === 'start-demo') { if (hasSavedPlan() && !armed(b, state.isDemo ? 'This replaces the example on screen. Click again' : 'This replaces your plan (a backup is kept). Click again')) return; const kept = !state.isDemo && backupSaved(); state = migrate(clone(b.dataset.demo === 'gala' ? window.BFDemo.DEMO_GALA : window.BFDemo.DEMO_STATE)); openOption = 0; touched = true; say(`Example loaded. All of its numbers are made up.${kept ? ' Your own plan was kept as a backup: use “Restore previous plan” under Save & backup to get it back.' : ''}`); return go('step-event'); }
-    else if (a === 'toggle-save') { savePanel = !savePanel; }
+    else if (a === 'start-demo') { if (hasSavedPlan() && !armed(b, state.isDemo ? 'This replaces the example on screen. Click again' : 'This replaces your plan (a backup is kept). Click again')) return; const kept = backupSaved(); state = migrate(clone(b.dataset.demo === 'gala' ? window.BFDemo.DEMO_GALA : window.BFDemo.DEMO_STATE)); openOption = 0; touched = true; say(`Example loaded. All of its numbers are made up.${kept ? ' Your own plan was kept as a backup: use “Restore previous plan” under Save & backup to get it back.' : ''}`); return go('step-event'); }
+    else if (a === 'toggle-save') { savePanel = !savePanel; render(); return; } // opening the panel is not an edit: don't save the example as a plan
     else if (a === 'csv-template') return showText('Survey summary CSV template', 'summary-template.csv', 'metric,option_id,value\nsurvey_responses,,0\n' + state.options.map((o) => ['paid_registrations', 'cash_received', 'named_high_intent', 'definitely_at_price', 'probably_at_price'].map((m) => `${m},${o.id},0`).join('\n')).join('\n') + '\n', 'text/csv');
     else if (a === 'export') return showText('Your plan (JSON). Copy it and save it in a file, or use Download where it works.', 'fundraiser-plan.json', JSON.stringify(state, null, 2), 'application/json');
     else if (a === 'copy-export') return copyText(document.getElementById('export-text').value, b);
     else if (a === 'download-export') { const t = document.getElementById('export-text'); return download(t.dataset.name, t.value, t.dataset.type); }
     else if (a === 'close-export') { document.getElementById('export-panel').hidden = true; return; }
-    else if (a === 'load-demo') { if (!armed(b, 'Replace your plan with the example? A backup is kept. Click again')) return; const kept = !state.isDemo && backupSaved(); state = migrate(clone(window.BFDemo.DEMO_STATE)); openOption = 0; savePanel = false; say(`Golf example loaded. All of its numbers are made up.${kept ? ' Your previous plan was kept as a backup.' : ''}`); }
-    else if (a === 'start-blank') { if ((view !== 'home' || hasSavedPlan()) && !armed(b, 'This replaces your current plan (a backup is kept). Click again')) return; const kept = !state.isDemo && backupSaved(); touched = true; state = migrate(clone(window.BFDemo.BLANK_STATE)); openOption = 0; savePanel = false; say(`New plan started. It saves in this browser as you go.${kept ? ' Your previous plan was kept as a backup.' : ''}`); return go('step-event'); }
+    else if (a === 'load-demo') { if (!armed(b, 'Replace your plan with the example? A backup is kept. Click again')) return; const kept = backupSaved(); state = migrate(clone(window.BFDemo.DEMO_STATE)); openOption = 0; savePanel = false; say(`Golf example loaded. All of its numbers are made up.${kept ? ' Your previous plan was kept as a backup.' : ''}`); }
+    else if (a === 'start-blank') { if ((view !== 'home' || hasSavedPlan()) && !armed(b, 'This replaces your current plan (a backup is kept). Click again')) return; const kept = backupSaved(); touched = true; state = migrate(clone(window.BFDemo.BLANK_STATE)); openOption = 0; savePanel = false; say(`New plan started. It saves in this browser as you go.${kept ? ' Your previous plan was kept as a backup.' : ''}`); return go('step-event'); }
     else if (a === 'restore-backup') {
       const bk = backupInfo(); if (!bk) { say('There is no backup to restore.'); return; }
       if (!armed(b, 'Swap your current plan with the backup? Click again')) return;
@@ -1073,8 +1077,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
           candidate.options.forEach((o) => { analyse(o); });
           viewResults(); viewWizard(); boardMemo();
         } catch (err) { state = prevState; throw new Error('the plan has values the planner cannot use (' + err.message + ').'); }
-        let backedUp = false;
-        try { if (prevSaved) { localStorage.setItem(SAVE_KEY + '-backup', prevSaved); localStorage.setItem(SAVE_KEY + '-backup-at', new Date().toISOString()); backedUp = true; } } catch (e) { /* ignore */ }
+        const backedUp = backupSaved(prevSaved); // same rule as the other replacements
         openOption = 0; touched = true;
         try { render(); } catch (err) { state = prevState; try { if (prevSaved) localStorage.setItem(SAVE_KEY, prevSaved); } catch (e) { /* ignore */ } render(); throw err; }
         say(backedUp ? 'Plan imported. Your previous plan was kept as a backup in this browser.' : 'Plan imported.');
