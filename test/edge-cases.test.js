@@ -132,3 +132,14 @@ test('exposure summary: cash needed up front and the most that could be lost und
   assert.equal(d2.exposure.lossIfCanceled, null);
   assert.equal(d2.exposure.cancellationKnown, false);
 });
+
+test('an unreachable target is mentioned only when the event can break even (no "most it could raise is $-2,640")', () => {
+  const notViable = base({ price: 10, scenarioParticipants: { conservative: 5, middle: 10, optimistic: 20 } });
+  const s1 = stateFor(notViable, { paidRegistrations: {}, paidCashReceived: {} }); s1.settings.fundraisingTarget = 2000;
+  const d1 = E.decide(s1, notViable);
+  assert.equal(d1.status, 'not_viable_as_configured');
+  assert.ok(!d1.reasons.some((r) => /most it could raise/.test(r)), d1.reasons.join(' | '));
+  const viable = base({ scenarioParticipants: { conservative: 20, middle: 30, optimistic: 40 } });
+  const s2 = stateFor(viable); s2.settings.fundraisingTarget = 100000;
+  assert.ok(E.decide(s2, viable).reasons.some((r) => /target is not reachable.*most it could raise is \$1,500\)/.test(r)));
+});

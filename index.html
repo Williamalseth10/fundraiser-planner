@@ -322,7 +322,7 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
   const nonNeg = (x) => Math.max(0, Number(x) || 0);
   const int = (x) => Math.max(0, Math.floor(Number(x) || 0));
   // Dollars for sentences shown to people: $2,740.00 (same thousands separator as the rest of the page).
-  const usd = (x) => '$' + (Number(x) || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const usd = (x) => { const n = Number(x) || 0; return (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
 
   /** Step between feasible participant counts (1, or group size when whole groups are required). */
   function participantStep(option) {
@@ -749,7 +749,8 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
       if (missing.length) reasons.push(`${missing.length} item${missing.length > 1 ? 's below still need' : ' below still needs'} checking before anyone signs.`);
     }
     if (be.reachableWithinCapacity && conditional && conditional.participants !== be.participants) reasons.push(`With your low-case ${assumedWords(conditional.uses)}, break-even would be ${conditional.participants}${conditional.reachableWithinCapacity ? '' : ' (not reachable)'}. That depends on assumptions, so the firm number above is the one to rely on.`);
-    if (target > 0 && !tg.reachableWithinCapacity) reasons.push(`The $${target.toLocaleString('en-US')} target is not reachable even at full capacity with only collected/committed sponsorship (the most it could raise is $${Math.round(tg.netAtCapacity).toLocaleString('en-US')}).`);
+    // Only when the event can at least break even; otherwise the "loses money even at capacity" reason already says more.
+    if (target > 0 && be.reachableWithinCapacity && !tg.reachableWithinCapacity) reasons.push(`The $${target.toLocaleString('en-US')} target is not reachable even at full capacity with only collected/committed sponsorship (the most it could raise is $${Math.round(tg.netAtCapacity).toLocaleString('en-US')}).`);
 
     // The plain answers to "how much cash do we need first?" and "how much could we lose?", under the terms entered.
     const lossIfNobodyComes = Math.max(0, -worst.netIfNobodyRegisters);
