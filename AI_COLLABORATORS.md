@@ -31,6 +31,8 @@ William owns this project and decides what gets merged. Claude is the lead imple
 - `index.html` is generated, so edit the files in `src/` instead.
 - The site must work at phone width (375px) without sideways scrolling, in light and dark mode, and with a keyboard.
 - Run `node --test test/*.test.js` before proposing. If you can't run code, say so plainly rather than claiming tests passed.
+- For UI changes, also run the browser tests (`python3 test/ui_smoke.py`, `ui_review.py`, `ui_journey.py`). A passing test that only checks a button is visible is not proof the feature works: check what actually loads and saves.
+- No external requests (fonts, scripts, analytics). The page must work offline as a single file.
 
 ## Where to find things in `src/app.js`
 - `STEPS`: the 10 wizard steps (title, help text, and the function that draws each one)
@@ -39,3 +41,5 @@ William owns this project and decides what gets merged. Claude is the lead imple
 - `renderSummary()`, `renderComparison()`, `renderDetail()`: the results sections
 - `surveyText()`: the supporter survey text
 - `boardMemo()`: the "Copy board summary" text
+- `viewGuide()` and `COLLECT`: the "How to use" page and the checklist of information to collect (mirrored in `docs/START_HERE.md`)
+- `loadSavedPlan()`, `backupSaved()`, `validatePlan()`, `importJson()`: everything that protects saved work. `loadSavedPlan()` must run after all constants are defined (see DECISION_LOG row 63).

@@ -14,3 +14,28 @@ jobs:
         run: node scripts/build.js
       - name: index.html is up to date with src/
         run: git diff --exit-code index.html || (echo "index.html is out of date. Run node scripts/build.js and commit it." && exit 1)
+
+  # Browser checks: the full volunteer journey, import safety, keyboard access and layout at phone width.
+  # Runs on GitHub's standard free runner; no paid services. Playwright is pinned so results are repeatable.
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Playwright and Chromium
+        run: |
+          python -m pip install playwright==1.56.0
+          python -m playwright install --with-deps chromium
+      - name: Build
+        run: node scripts/build.js
+      - name: Smoke test
+        run: python test/ui_smoke.py
+      - name: Review regressions (import safety, keyboard)
+        run: python test/ui_review.py
+      - name: Volunteer journey
+        run: python test/ui_journey.py
