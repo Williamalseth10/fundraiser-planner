@@ -7,6 +7,10 @@
   let state = clone(window.BFDemo.DEMO_STATE);
   let touched = false; // only save once the person has actually started a plan
   let startupNote = '';
+  // Every storage write reports whether it worked. Keys in lockedKeys hold data that couldn't be set aside; never write over them.
+  const lockedKeys = new Set();
+  function storeWrite(key, value) { if (lockedKeys.has(key)) return false; try { localStorage.setItem(key, value); return true; } catch (e) { return false; } }
+  function storeRead(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
   // Use the saved plan only if it passes the same checks as an import; otherwise try the backup, then fall back to the example.
   // Runs at the very end of this file, after EVENT_TYPES and validatePlan's other dependencies exist. (Until 2026-11 it ran
   // here, before they were defined, so every reload threw, showed the example, and the next edit overwrote the saved plan.)
@@ -19,12 +23,19 @@
       try { saved = JSON.parse(raw); problems = validatePlan(saved); } catch (e) { problems = ['unreadable']; }
       if (!problems.length) {
         state = migrate(saved); touched = true;
-        if (key !== SAVE_KEY) startupNote = 'Your saved plan could not be read, so your backup copy was loaded. The unreadable copy was kept aside, not deleted.';
+        if (key !== SAVE_KEY) startupNote = 'Your saved plan could not be read, so your backup copy was loaded. ' + (lockedKeys.has(SAVE_KEY)
+          ? 'The unreadable copy could not be set aside, so this browser will not save over it: changes are NOT saved here. Download a backup file to keep your work.'
+          : 'The unreadable copy was kept aside, not deleted.');
         return;
       }
-      // Keep an unreadable copy aside so nothing typed later can overwrite it.
-      try { if (!storage.getItem(key + '-unreadable')) storage.setItem(key + '-unreadable', raw); } catch (e) { /* ignore */ }
-      startupNote = 'Your saved plan could not be read safely, so it was not loaded. It was kept aside in this browser, not deleted. If you have a backup file, open it under Save & backup.';
+      // Keep an unreadable copy aside so nothing typed later can overwrite it. If that isn't possible (storage full, or an
+      // older unreadable copy already there), lock the key instead: the app then refuses to write over it and says so.
+      const aside = storage.getItem(key + '-unreadable');
+      const keptAside = aside === raw || (!aside && storeWrite(key + '-unreadable', raw));
+      if (!keptAside) lockedKeys.add(key);
+      if (key === SAVE_KEY) startupNote = 'Your saved plan could not be read safely, so it was not loaded. ' + (keptAside
+        ? 'It was kept aside in this browser, not deleted. If you have a backup file, open it under Save & backup.'
+        : 'It could not be copied aside, so this browser will not save over it: changes you make now are NOT saved here. Download a backup file to keep new work.');
     }
   }
   function migrate(st) {
@@ -41,19 +52,35 @@
     return st;
   }
   state = migrate(state);
-  // Before an example, a blank plan or an import replaces the plan, keep the saved one as a backup (one level).
+  // Before an example, a blank plan or an opened file replaces the plan, keep the plan on screen as a backup (one level).
   // An example (isDemo) never overwrites a backup of a real plan; it may fill an empty backup or replace another example.
+  //   'saved'         the plan on screen is now the backup
+  //   'not-needed'    nothing of the person's own to keep (the untouched starting example, or any example)
+  //   'kept-existing' an example on screen, a real plan already in the backup: the backup is left alone
+  //   'failed'        a real plan could not be written to the backup: the caller must NOT replace anything
   const isDemoText = (raw) => { try { return !!JSON.parse(raw).isDemo; } catch (e) { return false; } };
-  function backupSaved(prevRaw) {
-    try {
-      const prev = prevRaw !== undefined ? prevRaw : localStorage.getItem(SAVE_KEY);
-      if (!prev) return false;
-      const existing = localStorage.getItem(SAVE_KEY + '-backup');
-      if (isDemoText(prev) && existing && !isDemoText(existing)) return false;
-      localStorage.setItem(SAVE_KEY + '-backup', prev);
-      localStorage.setItem(SAVE_KEY + '-backup-at', new Date().toISOString());
-      return true;
-    } catch (e) { return false; }
+  function secureBackup() {
+    if (!touched) return 'not-needed';
+    const existing = storeRead(SAVE_KEY + '-backup');
+    if (state.isDemo && existing && !isDemoText(existing)) return 'kept-existing';
+    if (!storeWrite(SAVE_KEY + '-backup', JSON.stringify(state))) return state.isDemo ? 'not-needed' : 'failed';
+    storeWrite(SAVE_KEY + '-backup-at', new Date().toISOString()); // only the "kept at" time; the backup itself is safe
+    return 'saved';
+  }
+  // Replace the plan on screen only once the current one is safely kept. Returns false (and changes nothing) otherwise.
+  function replacePlan(next, doneMsg, claimAutosave) {
+    const bk = secureBackup();
+    if (bk === 'failed') {
+      savePanel = true; render();
+      say('Could not make a backup of your current plan (this browser refused to store it), so nothing was replaced. Your plan is still here and unchanged. Use Download backup file to keep a copy before trying again.');
+      return false;
+    }
+    state = next; openOption = 0; touched = true;
+    const saved = persist();
+    say(doneMsg
+      + (bk === 'saved' ? ' Your previous plan was kept as a backup: Save & backup → Restore previous plan brings it back.' : '')
+      + (saved ? (claimAutosave ? ' It saves in this browser as you go.' : '') : ' It is NOT saved in this browser yet: see the red warning.'));
+    return true;
   }
   function backupInfo() {
     try {
@@ -62,10 +89,27 @@
       return { plan, at: localStorage.getItem(SAVE_KEY + '-backup-at') || '' };
     } catch (e) { return null; }
   }
-  function persist() { if (!touched) return; try { localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ } }
-  function hasSavedPlan() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
+  // Save the plan on screen. Returns whether it worked; a failure shows a warning that stays until a save succeeds.
+  function persist() {
+    if (!touched) return true;
+    const ok = storeWrite(SAVE_KEY, JSON.stringify(state));
+    setSaveProblem(ok ? '' : lockedKeys.has(SAVE_KEY)
+      ? 'Your changes are not saved in this browser, to protect an earlier saved plan that could not be read. Download a backup file to keep your work.'
+      : 'Your latest changes are not saved: this browser refused to store them (its storage may be full or blocked). Download a backup file now so you don\'t lose them.');
+    return ok;
+  }
+  function hasSavedPlan() { return !!storeRead(SAVE_KEY); }
   let saidAt = 0;
   function say(msg) { const el = document.getElementById('status'); if (el) { el.textContent = msg; el.hidden = !msg; saidAt = Date.now(); } }
+  let saveProblem = ''; // non-empty while the plan on screen is not saved
+  function setSaveProblem(msg) {
+    if (msg && !saveProblem) { const st = document.getElementById('status'); if (st && /saves in this browser/.test(st.textContent)) say(''); } // don't leave a stale "it saves" claim
+    saveProblem = msg; showSaveWarning();
+  }
+  function showSaveWarning() {
+    const el = document.getElementById('save-warning'); if (!el) return;
+    el.hidden = !saveProblem; const t = el.querySelector('[data-role="text"]'); if (t) t.textContent = saveProblem;
+  }
   // In-page two-click confirmation (browser confirm() dialogs are unavailable in some viewers).
   function armed(btn, label) {
     if (btn.dataset.armed === '1') { btn.dataset.armed = ''; return true; }
@@ -629,6 +673,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       const nobody = t.survey === 'buy' ? 'nothing sells' : 'nobody comes';
       const have = d.paid + d.namedCounted;
       const gapOpen = x.shortBeforeEvent > 0 && !o.upfrontFundingConfirmed;
+      const moreLoss = x.worstOnChartLoss > x.largestLoss; // the two-case figure is not a maximum; say so when the chart goes lower
       const top = a.sens.results[0];
       const why = [...d.reasons];
       if (d.breakEven.reachableWithinCapacity && d.breakEven.participants === 0) why.push(`Collected and committed sponsorship alone would cover costs even with zero ${t.many}. Confirm sponsors would still pay if the event is small or canceled.`);
@@ -648,7 +693,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <p class="meaning">${esc(STATUS_MEANING[d.status])}</p>
         <div class="cards">
           <div class="card ${gapOpen ? 'bad' : ''}"><span>${t.survey === 'buy' ? 'Cash needed up front' : 'Cash needed before event day'}</span><b>${hm(x.cashNeededBeforeEvent)}</b><em>Deposit and bills due in advance. You have ${hm(x.cashInHand)} in hand${x.shortBeforeEvent > 0 ? `, so you are short ${hm(x.shortBeforeEvent)}${o.upfrontFundingConfirmed ? ' (the club confirmed it can cover this)' : ' (not yet covered)'}` : ''}.${d.firm.upfront.registrationCashUnknown ? ' Money received from people who paid is not entered yet.' : ''}</em></div>
-          <div class="card ${x.largestLoss > 0 ? 'bad' : ''}"><span>Most you could lose</span><b>${hm(x.largestLoss)}${x.cancellationKnown ? '' : ' or more'}</b><em>If ${nobody}: ${hm(x.lossIfNobodyComes)}. If you cancel after the deadline: ${x.cancellationKnown ? hm(x.lossIfCanceled) : 'not entered yet'}. Uses only the terms you entered.</em></div>
+          <div class="card ${x.largestLoss > 0 || moreLoss ? 'bad' : ''}"><span>Loss if ${nobody} or you cancel</span><b>${hm(x.largestLoss)}${x.cancellationKnown ? '' : ' or more'}</b><em>If ${nobody}: ${hm(x.lossIfNobodyComes)}. If you cancel after the deadline: ${x.cancellationKnown ? hm(x.lossIfCanceled) : 'not entered yet'}. ${moreLoss ? `<strong>Holding it can lose more:</strong> at ${x.worstOnChart.participants} ${esc(t.many)}, firm money comes out at ${hm(x.worstOnChart.net)} (see the chart).` : 'Other turnouts can lose more; check the chart.'} Uses only the terms you entered.</em></div>
           <div class="card ${!d.breakEven.reachableWithinCapacity || d.breakEven.participants > have ? 'bad' : ''}"><span>Needed to break even</span><b>${d.breakEven.reachableWithinCapacity ? `${d.breakEven.participants} ${esc(unit)}` : 'Not reachable'}</b><em>${d.breakEven.reachableWithinCapacity ? '' : `Even all ${d.breakEven.maxFeasible} wouldn't cover costs. `}${d.breakEven.reachableWithinCapacity && d.paid > 0 && d.breakEven.participants <= d.paid ? `Already reached by the ${d.paid} who have paid. ` : ''}Firm money only${t.proceeds ? ', no auction bids' : ''}. You have ${d.paid} paid + ${d.namedCounted} named “yes” = ${have}. Named answers are not money.</em></div>
           <div class="card"><span>Likely case (your estimate)</span><b>${hm(P.middle.net)}</b><em>Low case ${hm(P.conservative.net)}, high case ${hm(P.optimistic.net)}. These use your own numbers and are not predictions.${t.proceeds ? ' They include your auction and raffle estimates.' : ''}</em></div>
         </div>
@@ -688,7 +733,8 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       L.push('', `## ${o.name}`, `**Status: ${E.STATUS_LABELS[d.status]}**`);
       L.push(`${STATUS_MEANING[d.status]}`);
       L.push('', `> **Read-aloud (30 seconds):** ${readAloud(o, d, P, hm)}`, '');
-      L.push(`- Cash needed before the event: ${hm(d.exposure.cashNeededBeforeEvent)}. Most you could lose under the terms entered: ${hm(d.exposure.largestLoss)}${d.exposure.cancellationKnown ? '' : ' or more (cancellation terms not entered)'}.`);
+      const xp = d.exposure, nobodyM = T(o).survey === 'buy' ? 'nothing sells' : 'nobody comes';
+      L.push(`- Cash needed before the event: ${hm(xp.cashNeededBeforeEvent)}. Loss if ${nobodyM} or you cancel after the deadline, under the terms entered: ${hm(xp.largestLoss)}${xp.cancellationKnown ? '' : ' or more (cancellation terms not entered)'}. ${xp.worstOnChartLoss > xp.largestLoss ? `Holding it can lose more: at ${xp.worstOnChart.participants} ${T(o).many}, firm money comes out at ${hm(xp.worstOnChart.net)}.` : 'Other turnouts can lose more; see the chart in the planner.'}`);
       d.reasons.forEach((r) => L.push(`- ${r}`));
       L.push(`- Break-even (firm sponsorship only): ${d.breakEven.reachableWithinCapacity ? d.breakEven.participants + ' ' + T(o).many : 'not reachable within capacity'} of ${d.breakEven.maxFeasible} feasible.`);
       L.push(`- Net: conservative ${hm(P.conservative.net)} (${P.conservative.participants}), middle ${hm(P.middle.net)} (${P.middle.participants}), optimistic ${hm(P.optimistic.net)} (${P.optimistic.participants}).`);
@@ -784,7 +830,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <ol class="steps">
           <li>On the home page, choose <b>Try a golf example</b>. A yellow bar reminds you that every number is made up.</li>
           <li>Click <b>Next</b> through the steps to see what each one asks. You don't need to change anything.</li>
-          <li>Choose <b>See results</b>. Each option shows a status, four answers (cash needed first, most you could lose, how many are needed to break even, and the likely case) and a list of things to verify.</li>
+          <li>Choose <b>See results</b>. Each option shows a status, four answers (cash needed first, what you'd lose if nobody comes or you cancel, how many are needed to break even, and the likely case) and a list of things to verify.</li>
           <li>Try one change: go back to <b>What will you charge?</b>, lower the shotgun-start price to $60 and the foursome price to $240, then look at the results again. The status changes to “Not viable as currently configured”.</li>
         </ol>
       </section>
@@ -978,21 +1024,29 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     else if (a === 'copy-memo') return copyText(boardMemo(), b);
     else if (a === 'nav') return go(b.dataset.to);
     else if (a === 'opt-step') { openOption = i; render(true); window.scrollTo(0, 0); return; }
-    else if (a === 'start-demo') { if (hasSavedPlan() && !armed(b, state.isDemo ? 'This replaces the example on screen. Click again' : 'This replaces your plan (a backup is kept). Click again')) return; const kept = backupSaved(); state = migrate(clone(b.dataset.demo === 'gala' ? window.BFDemo.DEMO_GALA : window.BFDemo.DEMO_STATE)); openOption = 0; touched = true; say(`Example loaded. All of its numbers are made up.${kept ? ' Your own plan was kept as a backup: use “Restore previous plan” under Save & backup to get it back.' : ''}`); return go('step-event'); }
+    else if (a === 'start-demo') { if (hasSavedPlan() && !armed(b, state.isDemo ? 'This replaces the example on screen. Click again' : 'This replaces your plan (a backup is kept). Click again')) return; if (!replacePlan(migrate(clone(b.dataset.demo === 'gala' ? window.BFDemo.DEMO_GALA : window.BFDemo.DEMO_STATE)), 'Example loaded. All of its numbers are made up.')) return; return go('step-event'); }
     else if (a === 'toggle-save') { savePanel = !savePanel; render(); return; } // opening the panel is not an edit: don't save the example as a plan
     else if (a === 'csv-template') return showText('Survey summary CSV template', 'summary-template.csv', 'metric,option_id,value\nsurvey_responses,,0\n' + state.options.map((o) => ['paid_registrations', 'cash_received', 'named_high_intent', 'definitely_at_price', 'probably_at_price'].map((m) => `${m},${o.id},0`).join('\n')).join('\n') + '\n', 'text/csv');
-    else if (a === 'export') return showText('Your plan (JSON). Copy it and save it in a file, or use Download where it works.', 'fundraiser-plan.json', JSON.stringify(state, null, 2), 'application/json');
+    else if (a === 'export' || a === 'warn-export') return showText('Your plan (JSON). Copy it and save it in a file, or use Download where it works.', 'fundraiser-plan.json', JSON.stringify(state, null, 2), 'application/json');
     else if (a === 'copy-export') return copyText(document.getElementById('export-text').value, b);
     else if (a === 'download-export') { const t = document.getElementById('export-text'); return download(t.dataset.name, t.value, t.dataset.type); }
     else if (a === 'close-export') { document.getElementById('export-panel').hidden = true; return; }
-    else if (a === 'load-demo') { if (!armed(b, 'Replace your plan with the example? A backup is kept. Click again')) return; const kept = backupSaved(); state = migrate(clone(window.BFDemo.DEMO_STATE)); openOption = 0; savePanel = false; say(`Golf example loaded. All of its numbers are made up.${kept ? ' Your previous plan was kept as a backup.' : ''}`); }
-    else if (a === 'start-blank') { if ((view !== 'home' || hasSavedPlan()) && !armed(b, 'This replaces your current plan (a backup is kept). Click again')) return; const kept = backupSaved(); touched = true; state = migrate(clone(window.BFDemo.BLANK_STATE)); openOption = 0; savePanel = false; say(`New plan started. It saves in this browser as you go.${kept ? ' Your previous plan was kept as a backup.' : ''}`); return go('step-event'); }
+    else if (a === 'load-demo') { if (!armed(b, 'Replace your plan with the example? A backup is kept. Click again')) return; if (!replacePlan(migrate(clone(window.BFDemo.DEMO_STATE)), 'Golf example loaded. All of its numbers are made up.')) return; savePanel = false; }
+    else if (a === 'start-blank') { if ((view !== 'home' || hasSavedPlan()) && !armed(b, 'This replaces your current plan (a backup is kept). Click again')) return; if (!replacePlan(migrate(clone(window.BFDemo.BLANK_STATE)), 'New plan started.', true)) return; savePanel = false; return go('step-event'); }
     else if (a === 'restore-backup') {
       const bk = backupInfo(); if (!bk) { say('There is no backup to restore.'); return; }
       if (!armed(b, 'Swap your current plan with the backup? Click again')) return;
-      const current = (() => { try { return localStorage.getItem(SAVE_KEY); } catch (e) { return null; } })();
-      state = migrate(clone(bk.plan)); openOption = 0; touched = true;
-      try { if (current) { localStorage.setItem(SAVE_KEY + '-backup', current); localStorage.setItem(SAVE_KEY + '-backup-at', new Date().toISOString()); } } catch (e) { /* ignore */ }
+      // A swap needs two writes. Change the plan on screen only if both work; otherwise put back what was there and say so.
+      const fail = 'Could not restore: this browser refused to store the change. Your current plan is still here. Use Download backup file to keep a copy.';
+      const backupRaw = storeRead(SAVE_KEY + '-backup'), primaryBefore = storeRead(SAVE_KEY), currentRaw = JSON.stringify(state);
+      if (!storeWrite(SAVE_KEY, backupRaw)) { say(fail); return; }
+      if (!storeWrite(SAVE_KEY + '-backup', currentRaw)) {
+        const undone = primaryBefore != null ? storeWrite(SAVE_KEY, primaryBefore) : (() => { try { localStorage.removeItem(SAVE_KEY); return true; } catch (e) { return false; } })();
+        if (!undone) setSaveProblem('Your current plan is not saved in this browser (a restore could not finish). Download a backup file now so you don\'t lose it.');
+        say(fail); return;
+      }
+      storeWrite(SAVE_KEY + '-backup-at', new Date().toISOString());
+      state = migrate(clone(bk.plan)); openOption = 0; touched = true; setSaveProblem('');
       say('Previous plan restored. The plan you had open is now the backup, so you can swap back.');
     }
     else if (a === 'download-backup') { const day = new Date().toISOString().slice(0, 10); return download(`fundraiser-plan-${day}.json`, JSON.stringify(state, null, 2), 'application/json'); }
@@ -1070,17 +1124,24 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         const problems = validatePlan(s);
         if (problems.length) throw new Error(problems.slice(0, 3).join(' ') + (problems.length > 3 ? ` (${problems.length - 3} more)` : ''));
         const candidate = migrate(clone(s));
-        const prevState = state, prevSaved = (() => { try { return localStorage.getItem(SAVE_KEY); } catch (e) { return null; } })();
+        const prevState = state, prevSaved = storeRead(SAVE_KEY);
         try {
           state = candidate;
           // Dry run: every calculation and page the plan feeds must work before anything is replaced.
           candidate.options.forEach((o) => { analyse(o); });
           viewResults(); viewWizard(); boardMemo();
         } catch (err) { state = prevState; throw new Error('the plan has values the planner cannot use (' + err.message + ').'); }
-        const backedUp = backupSaved(prevSaved); // same rule as the other replacements
-        openOption = 0; touched = true;
-        try { render(); } catch (err) { state = prevState; try { if (prevSaved) localStorage.setItem(SAVE_KEY, prevSaved); } catch (e) { /* ignore */ } render(); throw err; }
-        say(backedUp ? 'Plan imported. Your previous plan was kept as a backup in this browser.' : 'Plan imported.');
+        state = prevState; // the backup is of the plan on screen, so put it back while the backup is made
+        const bk = secureBackup(); // same rule as the other replacements: no backup of a real plan, no replacement
+        if (bk === 'failed') {
+          savePanel = true; render();
+          say('Could not make a backup of your current plan (this browser refused to store it), so the file was not opened. Your plan is still here and unchanged. Use Download backup file to keep a copy before trying again.');
+          return;
+        }
+        const prevTouched = touched;
+        state = candidate; openOption = 0; touched = true;
+        try { render(); } catch (err) { state = prevState; touched = prevTouched; if (prevSaved != null) storeWrite(SAVE_KEY, prevSaved); render(); throw err; }
+        say('Plan imported.' + (bk === 'saved' ? ' Your previous plan was kept as a backup in this browser.' : '') + (saveProblem ? ' It is NOT saved in this browser yet: see the red warning.' : ''));
       } catch (err) { say('Could not import that file: ' + err.message); }
     });
   }

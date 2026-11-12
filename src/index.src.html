@@ -69,6 +69,9 @@ h3.sub { margin: 22px 0 8px; } h4 { font-size: 15px; margin: 18px 0 6px; }
 .site nav a:hover, .site nav button:hover { background: var(--surface-2); color: var(--text); }
 .site nav a.on { color: var(--accent); background: var(--accent-soft); font-weight: 700; }
 
+.save-warning { background: var(--bad-bg); color: var(--text); border-bottom: 2px solid var(--bad); padding-block: 10px; font-size: 16px; }
+.save-warning b { color: var(--bad); margin-right: 4px; }
+.save-warning-actions { display: inline-flex; flex-wrap: wrap; gap: 8px; margin-left: 6px; vertical-align: middle; }
 .demo { background: var(--demo-bg); border-bottom: 1px solid var(--demo-border); font-size: 15px; padding-block: 8px; }
 .demo b { margin-right: 6px; }
 .status { background: var(--accent-soft); border-radius: 8px; padding: 10px 14px; margin: 14px 0 0; font-size: 15px; }
@@ -267,12 +270,14 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
     </nav>
   </div>
 </header>
+<div id="save-warning" class="save-warning gutter" role="alert" hidden><div class="wrap"><b>Not saved.</b> <span data-role="text"></span>
+  <span class="save-warning-actions"><button class="small dl-only" data-action="download-backup">Download backup file</button> <button class="small" data-action="warn-export">Show plan as text</button></span></div></div>
 <div id="demo-banner" class="demo gutter" role="note" hidden><div class="wrap"><b>Example data.</b>Every quote, cost, survey answer and sponsor in this example is made up. Start a new plan to enter your own.</div></div>
 <div class="gutter"><div class="wrap">
   <div id="save-panel" hidden>
     <section class="panel">
       <h2>Save &amp; backup</h2>
-      <p>Your plan saves by itself, but <b>only in this browser on this device</b>. It is not stored online, it does not sync to other devices, and clearing your browser data can erase it. Download a backup file to keep a copy you control.</p>
+      <p>Your plan saves by itself, but <b>only in this browser on this device</b>. If saving ever fails, a red “Not saved” warning appears at the top until it works again. It is not stored online, it does not sync to other devices, and clearing your browser data can erase it. Download a backup file to keep a copy you control.</p>
       <div class="row-actions">
         <button class="btn dl-only" data-action="download-backup">Download backup file</button>
         <button class="small" data-action="export">Show plan as text</button>

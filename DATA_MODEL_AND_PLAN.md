@@ -15,6 +15,8 @@
 | `bfp-plan-v1-backup-at` | When the backup was kept. |
 | `bfp-plan-v1-unreadable` | A saved plan that failed the safety check at startup, kept aside so later typing can't overwrite it. |
 
+Every write reports whether it worked. A failed save shows a red "Not saved" warning until a save succeeds; replacing a real plan requires its backup to be written first; restore changes the plan only if both writes succeed. If an unreadable plan can't be copied aside, its key is locked and never written over (row 73).
+
 Nothing is sent anywhere. The page makes no network requests. Backups the person controls are JSON files they download.
 
 ## State (exported as JSON, `schemaVersion: 1`)
@@ -54,7 +56,7 @@ Sponsorship { id, label, amount, status: collected|committed|hoped, type: cash|i
 - **In-kind:** never revenue. It reduces only the one-time cost it replaces, up to that cost's amount, never below zero.
 - **Money inputs:** negative or non-numeric values count as 0 in the engine.
 - **Firm money** (`firmContext`): ticket money (money actually received for tickets already paid, plus the current price for the rest) and collected or committed sponsorship and in-kind, with the conservative cost cushion. No add-ons, other income or auction estimates. Used for break-even, the target, the chart and the cash-needed card.
-- **Exposure** (`decide().exposure`): cash needed before the event and the shortfall against cash in hand (firm basis); loss if nobody comes; loss if canceled after the deadline (amount owed + costs already paid; `null` when not entered); largest loss.
+- **Exposure** (`decide().exposure`): cash needed before the event and the shortfall against cash in hand (firm basis); loss if nobody comes; loss if canceled after the deadline (amount owed + costs already paid; `null` when not entered); `largestLoss`, the larger of those two cases only, which is **not** a maximum; and `worstOnChart`, the lowest point of the firm-money chart, shown when holding the event could lose more (row 74).
 - **Decision**, checked in this order:
   1. Firm money can't cover costs even at capacity, but the organizer's low-case assumptions would → **High financial risk**.
   2. Firm money can't cover costs even at capacity → **Not viable as currently configured**.

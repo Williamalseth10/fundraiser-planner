@@ -143,3 +143,16 @@ test('an unreachable target is mentioned only when the event can break even (no 
   const s2 = stateFor(viable); s2.settings.fundraisingTarget = 100000;
   assert.ok(E.decide(s2, viable).reasons.some((r) => /target is not reachable.*most it could raise is \$1,500\)/.test(r)));
 });
+
+test('exposure names the worst point on the firm-money chart, so a $0 "nothing sells or cancel" case is never the only loss shown', () => {
+  // Fictional review case: $10 price, $15 supplier cost per item, capacity 100, nothing else.
+  const o = base({ kind: 'product', price: 10, capacity: 100, fixedCosts: [], cancellationOwed: 0,
+    venueQuote: { flatFee: 0, perParticipant: 15, minimumParticipants: 0, minimumSpend: 0 },
+    deposit: { amount: 0, creditedTowardBill: true, refundable: true }, scenarioParticipants: { conservative: 10, middle: 50, optimistic: 100 } });
+  const d = E.decide(stateFor(o, { paidRegistrations: {}, paidCashReceived: {} }), o);
+  assert.equal(d.status, 'high_risk');                       // the existing safeguard stays
+  assert.equal(d.exposure.lossIfNobodyComes, 0);
+  assert.equal(d.exposure.lossIfCanceled, 0);
+  assert.deepEqual(d.exposure.worstOnChart, { participants: 100, net: -500 });
+  assert.equal(d.exposure.worstOnChartLoss, 500);
+});

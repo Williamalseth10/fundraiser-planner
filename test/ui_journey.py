@@ -103,7 +103,7 @@ with sync_playwright() as p:
     check('golf: numbers clear break-even, labeled as not a guarantee', 'Numbers hold up so far' in golf or 'Supported by current evidence' in golf, golf[:200])
     check('golf: cash needed before the event is $1,100 (deposit + prizes)', '$1,100' in golf, golf[:600])
     # Canceling: $800 owed + $600 prizes already paid = $1,400. Nobody comes: $1,600 minimum bill + $600 prizes - $1,000 collected = $1,200.
-    check('golf: most you could lose is $1,400 (cancel) and nobody-comes loss is $1,200', 'Most you could lose\n$1,400' in golf and 'If nobody comes: $1,200' in golf and 'If you cancel after the deadline: $1,400' in golf, golf[:900])
+    check('golf: loss if canceled is $1,400 and nobody-comes loss is $1,200', 'Loss if nobody comes or you cancel\n$1,400' in golf and 'If nobody comes: $1,200' in golf and 'If you cancel after the deadline: $1,400' in golf, golf[:900])
     check('dinner (free-ish, big rental): not viable', 'Not viable as currently configured' in dinner, dinner[:200])
     check('candles (no evidence): not enough evidence to decide', 'Not enough evidence to decide yet' in candles, candles[:200])
     check('candle sale counts items, not people', 'items sold' in candles)
@@ -198,6 +198,134 @@ with sync_playwright() as p:
     check('the fictional practice file opens', 'Plan imported' in p4.inner_text('#status') and 'Practice file' in p4.evaluate("JSON.parse(localStorage.getItem('bfp-plan-v1')).eventName"))
     check('example then file: the backup is still the real plan', p4.evaluate("JSON.parse(localStorage.getItem('bfp-plan-v1-backup')).eventName") == 'Real plan')
     c4.close()
+
+    # ---- storage failures (fault injection; DECISION_LOG row 73) ----
+    # Before the app loads, wrap Storage.setItem so writes throw a quota error on command. sessionStorage['__fault'] holds
+    # {"all": true} or {"keys": [...]}; it survives reloads in the tab and is read on every write, so tests can toggle it.
+    FAULTS = """(() => { const orig = Storage.prototype.setItem;
+      Storage.prototype.setItem = function (k, v) {
+        if (k !== '__fault') { let f = null; try { f = JSON.parse(window.sessionStorage.getItem('__fault') || 'null'); } catch (e) {}
+          if (f && (f.all || (f.keys || []).includes(k))) throw new DOMException('Synthetic quota (test)', 'QuotaExceededError'); }
+        return orig.call(this, k, v); }; })();"""
+    def faults(pg, spec): pg.evaluate("s => sessionStorage.setItem('__fault', JSON.stringify(s))", spec)
+    def stored(pg, key='bfp-plan-v1'):
+        raw = pg.evaluate(f"localStorage.getItem('{key}')")
+        try: return json.loads(raw).get('eventName') if raw else None
+        except ValueError: return raw
+    def warning(pg): return pg.inner_text('#save-warning') if pg.is_visible('#save-warning') else ''
+    def fresh_plan(pg, name):
+        pg.goto(URL); pg.click('#app [data-action="start-blank"]'); pg.wait_for_function("location.hash === '#step-event'")
+        pg.fill('[data-path="eventName"]', name); pg.press('[data-path="eventName"]', 'Tab'); pg.wait_for_timeout(80)
+    def open_panel(pg):
+        if not pg.is_visible('#save-panel'): pg.click('[data-action="toggle-save"]'); pg.wait_for_timeout(40)
+
+    # (a) an ordinary edit that can't be saved: persistent warning, export still has the latest edit, recovery clears it
+    c5 = b.new_context(accept_downloads=True); c5.add_init_script(FAULTS); p5 = c5.new_page()
+    fresh_plan(p5, 'Fictional saved plan A')
+    check('control: with storage working there is no unsaved warning', warning(p5) == '' and stored(p5) == 'Fictional saved plan A')
+    faults(p5, {'all': True})
+    p5.fill('[data-path="eventName"]', 'Fictional unsaved plan B'); p5.press('[data-path="eventName"]', 'Tab'); p5.wait_for_timeout(80)
+    check('failed save: stored plan is unchanged (still A)', stored(p5) == 'Fictional saved plan A')
+    check('failed save: a warning says the changes are not saved', 'not saved' in warning(p5).lower(), warning(p5))
+    check('failed save: no message claims saving is working', 'saves in this browser as you go' not in p5.inner_text('#status'))
+    p5.goto(URL + '#results'); p5.wait_for_timeout(80)
+    check('failed save: the warning stays on other pages', 'not saved' in warning(p5).lower())
+    if p5.is_visible('#save-warning [data-action="download-backup"]'):
+        with p5.expect_download() as dl5: p5.click('#save-warning [data-action="download-backup"]')
+        latest = json.loads(pathlib.Path(dl5.value.path()).read_text())['eventName']
+    else: latest = None
+    check('failed save: the warning offers a download holding the latest edit', latest == 'Fictional unsaved plan B', str(latest))
+    if p5.is_visible('#save-warning [data-action="warn-export"]'): p5.click('#save-warning [data-action="warn-export"]'); p5.wait_for_timeout(60)
+    check('failed save: "Show plan as text" in the warning holds the latest edit', '"Fictional unsaved plan B"' in (p5.input_value('#export-text') if p5.is_visible('#export-text') else ''))
+    faults(p5, None)
+    p5.goto(URL + '#step-event'); p5.wait_for_timeout(60)
+    p5.fill('[data-path="eventName"]', 'Fictional plan C'); p5.press('[data-path="eventName"]', 'Tab'); p5.wait_for_timeout(80)
+    check('after storage recovers: the plan saves and the warning clears', stored(p5) == 'Fictional plan C' and warning(p5) == '')
+    c5.close()
+
+    # (b) a required backup can't be written, although replacing the plan would succeed: nothing is replaced
+    for action, label in [('start-blank', 'start a blank plan'), ('load-demo', 'load the example'), ('import', 'open a file')]:
+        c6 = b.new_context(); c6.add_init_script(FAULTS); p6 = c6.new_page()
+        fresh_plan(p6, 'Fictional valuable plan')
+        faults(p6, {'keys': ['bfp-plan-v1-backup', 'bfp-plan-v1-backup-at']})
+        open_panel(p6)
+        if action == 'import':
+            practice = pathlib.Path(__file__).resolve().parent.parent / 'docs' / 'practice-plan-fictional.json'
+            p6.set_input_files('input[data-action="import-json"]', str(practice)); p6.wait_for_timeout(200)
+        else:
+            p6.click(f'#save-panel [data-action="{action}"]'); p6.click(f'#save-panel [data-action="{action}"]'); p6.wait_for_timeout(120)
+        msg = p6.inner_text('#status')
+        check(f'backup fails ({label}): the stored plan is not replaced', stored(p6) == 'Fictional valuable plan', str(stored(p6)))
+        check(f'backup fails ({label}): the plan stays on screen', p6.evaluate("document.querySelector('[data-path=\"eventName\"]') ? document.querySelector('[data-path=\"eventName\"]').value : document.title") == 'Fictional valuable plan' or 'Fictional valuable plan' in p6.inner_text('#app'), p6.inner_text('#app')[:120])
+        check(f'backup fails ({label}): the person is told and offered a download', 'backup' in msg.lower() and 'could not' in msg.lower() and 'download' in msg.lower(), msg)
+        check(f'backup fails ({label}): no message claims a backup was kept', 'kept as a backup' not in msg and 'was kept' not in msg, msg)
+        c6.close()
+
+    # (c) "no backup needed" is not reported as a failure: replacing an untouched example needs no backup
+    c7 = b.new_context(); c7.add_init_script(FAULTS); p7 = c7.new_page(); p7.goto(URL)
+    faults(p7, {'keys': ['bfp-plan-v1-backup', 'bfp-plan-v1-backup-at']})
+    p7.click('#app [data-action="start-blank"]'); p7.wait_for_timeout(120)
+    check('no backup needed: a first blank plan starts normally', p7.evaluate("location.hash") == '#step-event' and 'could not' not in p7.inner_text('#status').lower(), p7.inner_text('#status'))
+    c7.close()
+
+    # (d) restore can't write: nothing changes, nothing claims success
+    c8 = b.new_context(); c8.add_init_script(FAULTS); p8 = c8.new_page()
+    fresh_plan(p8, 'Fictional plan one')
+    open_panel(p8); p8.click('#save-panel [data-action="start-blank"]'); p8.click('#save-panel [data-action="start-blank"]'); p8.wait_for_timeout(100)
+    p8.fill('[data-path="eventName"]', 'Fictional plan two'); p8.press('[data-path="eventName"]', 'Tab'); p8.wait_for_timeout(80)
+    check('control: before the restore test, plan two is saved and plan one is the backup', stored(p8) == 'Fictional plan two' and stored(p8, 'bfp-plan-v1-backup') == 'Fictional plan one')
+    faults(p8, {'all': True})
+    open_panel(p8); p8.click('[data-action="restore-backup"]'); p8.click('[data-action="restore-backup"]'); p8.wait_for_timeout(100)
+    msg = p8.inner_text('#status')
+    check('restore write fails: stored plan and backup are unchanged', stored(p8) == 'Fictional plan two' and stored(p8, 'bfp-plan-v1-backup') == 'Fictional plan one')
+    check('restore write fails: the current plan stays on screen', p8.evaluate("JSON.stringify(document.querySelector('[data-path=\"eventName\"]') && document.querySelector('[data-path=\"eventName\"]').value)") == '"Fictional plan two"')
+    check('restore write fails: reported as not restored, with a download offered', 'could not' in msg.lower() and 'restored.' not in msg.lower() and 'download' in msg.lower(), msg)
+    faults(p8, None)
+    p8.click('[data-action="restore-backup"]'); p8.click('[data-action="restore-backup"]'); p8.wait_for_timeout(100)
+    check('control: restore works once storage works', stored(p8) == 'Fictional plan one' and stored(p8, 'bfp-plan-v1-backup') == 'Fictional plan two')
+    c8.close()
+
+    # (e) an unreadable saved plan that can't be kept aside is never overwritten, and the note says so truthfully
+    c9 = b.new_context(); c9.add_init_script(FAULTS); p9 = c9.new_page(); p9.goto(URL)
+    p9.evaluate("localStorage.setItem('bfp-plan-v1', '{not json')"); faults(p9, {'keys': ['bfp-plan-v1-unreadable']})
+    p9.reload(); p9.wait_for_timeout(120)
+    note = p9.inner_text('#status')
+    check('unreadable plan, aside-copy fails: the note does not claim it was kept aside', 'kept aside in this browser, not deleted' not in note, note)
+    p9.click('#app [data-action="start-blank"]'); p9.click('#app [data-action="start-blank"]'); p9.wait_for_timeout(100)
+    p9.fill('[data-path="eventName"]', 'Typed after'); p9.press('[data-path="eventName"]', 'Tab'); p9.wait_for_timeout(80)
+    check('unreadable plan, aside-copy fails: the unreadable saved copy is not overwritten', p9.evaluate("localStorage.getItem('bfp-plan-v1')") == '{not json')
+    check('unreadable plan, aside-copy fails: new typing shows the unsaved warning', 'not saved' in warning(p9).lower(), warning(p9))
+    c9.close()
+
+    # ---- "most you could lose" is not presented as a maximum when selling more loses more (DECISION_LOG row 74) ----
+    neg = json.loads((pathlib.Path(__file__).resolve().parent.parent / 'docs' / 'practice-plan-fictional.json').read_text())
+    sale = dict(neg['options'][1], id='sale', name='Fictional $10 sale with $15 supplier cost', capacity=100, price=10,
+                venueQuote={'flatFee': 0, 'perParticipant': 15, 'minimumParticipants': 0, 'minimumSpend': 0},
+                deposit={'amount': 0, 'creditedTowardBill': True, 'refundable': True}, fixedCosts=[], perParticipantCosts=[],
+                volunteerHours=0, cancellationOwed=0, quoteVerified=True, costsVerified=True,
+                scenarioParticipants={'conservative': 10, 'middle': 50, 'optimistic': 100})
+    neg['scenarioSettings'] = {k: {'label': k, 'statuses': ['collected', 'committed'], 'extraRevenuePerParticipant': 0, 'otherRevenue': 0, 'costContingencyPct': 0}
+                               for k in ('conservative', 'middle', 'optimistic')}  # as in the review's fixture: no assumed income
+    neg.update(isDemo=False, eventName='Fictional negative-margin sale', options=[sale], sponsorships=[], volunteerHoursAvailable=100,
+               settings={'fundraisingTarget': 0, 'volunteerHourValue': None},
+               evidence={'surveyResponses': 10, 'paidRegistrations': {'sale': 0}, 'paidCashReceived': {'sale': 0}, 'namedHighIntent': {'sale': 10},
+                         'surveyDefinitelyAtPrice': {'sale': 0}, 'surveyProbablyAtPrice': {'sale': 0}})
+    c10 = b.new_context(); p10 = c10.new_page(); p10.goto(URL); open_panel(p10)
+    p10.set_input_files('input[data-action="import-json"]', files=[{'name': 'neg.json', 'mimeType': 'application/json', 'buffer': json.dumps(neg).encode()}]); p10.wait_for_timeout(200)
+    p10.goto(URL + '#results'); p10.wait_for_timeout(120)
+    card = p10.locator('article.sum .card').nth(1).inner_text()
+    check('negative margin: still High financial risk', 'High financial risk' in p10.inner_text('article.sum'))
+    check('negative margin: likely case is -$250 and high case -$500, as in the review', 'Likely case (your estimate)\n−$250' in p10.inner_text('article.sum') and 'high case −$500' in p10.inner_text('article.sum'))
+    check('negative margin: a $0 loss figure is never shown without saying holding it can lose more', ('\n$0' not in card or 'Holding it can lose more' in card) and 'Most you could lose' not in card, card)
+    check('negative margin: the loss card names the -$500 at 100 items', '−$500' in card and '100' in card, card)
+    # capture "Copy board summary" text (both the clipboard API and the fallback copy path)
+    p10.evaluate("""() => { window.__copied = null;
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: (t) => { window.__copied = t; return Promise.resolve(); } } });
+      document.execCommand = () => { const el = document.activeElement; window.__copied = el && el.value; return true; }; }""")
+    p10.click('[data-action="copy-memo"]'); p10.wait_for_timeout(80)
+    memo = p10.evaluate("window.__copied") or ''
+    check('negative margin: the board summary does not call the $0 case the most you could lose', 'Most you could lose under the terms entered: $0' not in memo and '−$500' in memo, memo[memo.find('Cash needed'):][:300])
+    c10.close()
 
     # ---- widths and dark mode: no sideways scrolling on any page ----
     for w, scheme in [(375, 'light'), (768, 'dark'), (1280, 'dark')]:

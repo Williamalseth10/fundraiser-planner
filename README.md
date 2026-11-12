@@ -2,7 +2,7 @@
 
 A free, browser-only planner that helps booster clubs, PTAs and other small volunteer groups decide whether a fundraiser (a golf outing, a run or tournament, a dinner or gala, an auction or raffle night, or a product sale) is worth committing to **before** anyone signs a contract or orders stock.
 
-Volunteers enter real quotes, costs, sponsor commitments, money actually received and supporter-survey totals. The planner shows cash needed before the event, the most that could be lost under the entered terms, how many sign-ups or sales are needed to break even, which assumptions matter, and what to verify before signing. "Not enough evidence to decide yet" is a normal, valid result. No result is a guarantee.
+Volunteers enter real quotes, costs, sponsor commitments, money actually received and supporter-survey totals. The planner shows cash needed before the event, the loss if nobody comes or the event is canceled under the entered terms (and, when holding it could lose more, the worst point on the firm-money chart), how many sign-ups or sales are needed to break even, which assumptions matter, and what to verify before signing. "Not enough evidence to decide yet" is a normal, valid result. No result is a guarantee.
 
 **Volunteers: start with [`docs/START_HERE.md`](docs/START_HERE.md)**, or open the planner and choose **How to use**.
 
@@ -55,9 +55,10 @@ CI (`.github/workflows/ci.yml`) runs the engine tests, the build and an `index.h
 
 ## Saved plans and safety
 - Saved in the browser's local storage only. It is not a cloud backup and doesn't sync between devices.
-- An example, a blank plan or an opened file first keeps the current plan as a backup; "Restore previous plan" swaps them back.
+- An example, a blank plan or an opened file first keeps the current plan as a backup; if a real plan can't be backed up, nothing is replaced. "Restore previous plan" swaps them back, only if both writes succeed.
+- A failed save shows a red "Not saved" warning on every page, with Download backup file and Show plan as text (both hold the latest edits), until a save works again.
 - Opened files are type-checked and dry-run before anything is replaced. A failed import changes nothing, neither the plan on screen nor the saved copy.
-- A saved plan that fails the check at startup is kept aside (`bfp-plan-v1-unreadable`), never overwritten.
+- A saved plan that fails the check at startup is kept aside (`bfp-plan-v1-unreadable`). If that copy can't be made, the app won't write over it and says changes aren't being saved.
 - Everything displayed is escaped. Imported text can't run as code (covered by `ui_review.py`).
 
 ## Publishing (needs William's approval; nothing is published today)

@@ -1,6 +1,6 @@
 # Start here: Fundraiser Planner
 
-This planner helps you decide whether a fundraiser is worth committing to **before** anyone signs a contract or orders stock. You enter your real quote, costs, sponsors and supporter answers. It shows the cash you need first, the most you could lose, how many sign-ups or sales you need, and what still needs checking.
+This planner helps you decide whether a fundraiser is worth committing to **before** anyone signs a contract or orders stock. You enter your real quote, costs, sponsors and supporter answers. It shows the cash you need first, what you'd lose if nobody comes or you cancel, how many sign-ups or sales you need, and what still needs checking.
 
 It doesn't predict turnout, give tax or legal advice, or promise a result. "Not enough evidence to decide yet" is a normal, useful answer.
 
@@ -15,7 +15,7 @@ Tip: always open it on the **same computer, in the same browser**. That is where
 3. Choose **See results**. Each option shows:
    - a **status** and what it means,
    - **Cash needed before event day**,
-   - **Most you could lose**,
+   - **Loss if nobody comes or you cancel** (if holding the event could lose even more, the card says so and gives the amount),
    - **Needed to break even**,
    - **Likely case** (your own estimate, not a prediction),
    - and a list called **Must verify before signing**.
@@ -54,6 +54,8 @@ Answer one step at a time. Each money box has a short explanation underneath it.
 - If you load an example, start over, or open a file, your current plan is first kept as a backup in this browser. **Save & backup → Restore previous plan** brings it back.
 
 Download a fresh backup file whenever you've made changes you'd hate to lose.
+
+**If you see a red “Not saved” bar at the top:** your browser stopped saving (its storage may be full or blocked). Click **Download backup file** in that bar right away; the file includes your latest changes. The planner also refuses to replace your plan if it can't keep a backup first, and tells you so.
 
 **Practice opening a file:** the file `practice-plan-fictional.json` (made-up numbers) came with this guide. Choose **Save & backup → Open a backup file** and pick it. A gala and a cookie dough sale appear, marked as made up. Then use **Restore previous plan** to go back to what you had.
 

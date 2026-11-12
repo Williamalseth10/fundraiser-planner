@@ -450,13 +450,19 @@
     // Only when the event can at least break even; otherwise the "loses money even at capacity" reason already says more.
     if (target > 0 && be.reachableWithinCapacity && !tg.reachableWithinCapacity) reasons.push(`The $${target.toLocaleString('en-US')} target is not reachable even at full capacity with only collected/committed sponsorship (the most it could raise is $${Math.round(tg.netAtCapacity).toLocaleString('en-US')}).`);
 
-    // The plain answers to "how much cash do we need first?" and "how much could we lose?", under the terms entered.
+    // The plain answers to "how much cash do we need first?" and "what could we lose?", under the terms entered.
+    // largestLoss compares only two cases (nothing sells / cancel after the deadline). It is NOT a maximum: holding the
+    // event can lose more, e.g. when each sale costs more than it brings in. worstOnChart is the lowest point of the
+    // firm-money chart (same basis as break-even), so the results can say so instead of implying the two cases bound it.
     const lossIfNobodyComes = Math.max(0, -worst.netIfNobodyRegisters);
     const lossIfCanceled = cancel ? cancel.total : null;
+    const worstOnChart = netCurve(option, firmCtx).reduce((lo, p) => (p.net < lo.net ? p : lo), { participants: 0, net: Infinity });
     const exposure = {
       cashNeededBeforeEvent: firm.upfront.required, cashInHand: firm.upfront.cashInHand, shortBeforeEvent: firm.upfront.gap,
       lossIfNobodyComes, lossIfCanceled, cancellationKnown: !!cancel,
       largestLoss: Math.max(lossIfNobodyComes, lossIfCanceled || 0),
+      worstOnChart: { participants: worstOnChart.participants, net: worstOnChart.net },
+      worstOnChartLoss: Math.max(0, -worstOnChart.net),
     };
 
     return {
