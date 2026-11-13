@@ -18,8 +18,8 @@ Proceed if the answers to 1 and 3 are yes and the decision is still open.
 | Time | Step | Facilitator does / does not |
 |---|---|---|
 | 0–8 | **Decision record: before** (below) | Write their current plan down *before* opening the tool. Don't mention what the tool shows. |
-| 8–30 | They click **Start blank plan** and enter the real quote, costs, sponsors and any evidence | Answer "where does this go?" questions. Don't suggest numbers. Note every hesitation or wrong field. |
-| 30–38 | They read Step 3 aloud | Ask "What does this tell you?" Don't explain the status unless asked. Note misreadings. |
+| 8–30 | They click **Start a new plan** and enter the real quote, costs, sponsors and any evidence | Answer "where does this go?" questions. Don't suggest numbers. Note every hesitation or wrong field. |
+| 30–38 | They read the results and “What to tell the board (30 seconds)” aloud | Ask "What does this tell you?" Don't explain the status unless asked. Note misreadings. |
 | 38–45 | **Decision record: after** + 3 questions | Record their own words. |
 
 ## Decision record (fill BEFORE, then AFTER; keep both)

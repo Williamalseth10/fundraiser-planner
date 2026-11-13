@@ -38,5 +38,16 @@ jobs:
         run: python test/ui_smoke.py
       - name: Review regressions (import safety, keyboard)
         run: python test/ui_review.py
+      - name: Clarity and product correction
+        run: python test/ui_clarity.py
       - name: Volunteer journey
-        run: python test/ui_journey.py
+        run: |
+          mkdir -p browser-evidence
+          python test/ui_journey.py browser-evidence
+      - name: Save screenshots and print PDF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-evidence
+          path: browser-evidence/
+          retention-days: 14

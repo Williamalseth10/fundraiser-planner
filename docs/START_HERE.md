@@ -5,7 +5,7 @@ This planner helps you decide whether a fundraiser is worth committing to **befo
 It doesn't predict turnout, give tax or legal advice, or promise a result. "Not enough evidence to decide yet" is a normal, useful answer.
 
 ## Opening it
-Double-click **Fundraiser Planner.html**. It opens in your web browser (Chrome, Edge, Safari or Firefox). You don't need the internet, an account or a password.
+Use the [live website](https://williamalseth10.github.io/fundraiser-planner/), or double-click **Fundraiser Planner.html**. It opens in your web browser (Chrome, Edge, Safari or Firefox). You don't need the internet, an account or a password.
 
 Tip: always open it on the **same computer, in the same browser**. That is where your plan is saved (see "Saving and backups" below).
 
@@ -47,6 +47,7 @@ Answer one step at a time. Each money box has a short explanation underneath it.
 
 ## 4. Saving and backups (please read)
 - Your plan **saves by itself**, but **only in this browser on this computer**.
+- The website and downloaded HTML file keep separate saved plans. To move between them, use **Download backup file**, then **Open a backup file** in the other copy.
 - It is **not** saved online. It will **not** appear on your phone or another computer.
 - Clearing your browser history or site data, or using a private or incognito window, can **erase** it.
 - To keep a safe copy: click **Save & backup** at the top, then **Download backup file**. A file named like `fundraiser-plan-2026-11-11.json` goes to your Downloads folder. Keep it somewhere safe, or email it to yourself.
