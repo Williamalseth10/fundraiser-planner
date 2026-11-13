@@ -7,15 +7,37 @@
   let state = clone(window.BFDemo.DEMO_STATE);
   let touched = false; // only save once the person has actually started a plan
   let startupNote = '';
+  // Every storage write reports whether it worked. Keys in lockedKeys hold data that couldn't be set aside; never write over them.
+  const lockedKeys = new Set();
+  function storeWrite(key, value) { if (lockedKeys.has(key)) return false; try { localStorage.setItem(key, value); return true; } catch (e) { return false; } }
+  function storeRead(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
   // Use the saved plan only if it passes the same checks as an import; otherwise try the backup, then fall back to the example.
-  try {
+  // Runs at the very end of this file, after EVENT_TYPES and validatePlan's other dependencies exist. (Until 2026-11 it ran
+  // here, before they were defined, so every reload threw, showed the example, and the next edit overwrote the saved plan.)
+  function loadSavedPlan() {
+    let storage;
+    try { storage = window.localStorage; storage.getItem(SAVE_KEY); } catch (e) { return; } // storage unavailable: start from the example
     for (const key of [SAVE_KEY, SAVE_KEY + '-backup']) {
-      const raw = localStorage.getItem(key); if (!raw) continue;
-      const saved = JSON.parse(raw);
-      if (!validatePlan(saved).length) { state = saved; touched = true; if (key !== SAVE_KEY) startupNote = 'Your saved plan could not be read, so your backup copy was loaded.'; break; }
-      startupNote = 'Your saved plan could not be read safely, so it was not loaded.';
+      const raw = storage.getItem(key); if (!raw) continue;
+      let saved = null, problems;
+      try { saved = JSON.parse(raw); problems = validatePlan(saved); } catch (e) { problems = ['unreadable']; }
+      if (!problems.length) {
+        state = migrate(saved); touched = true;
+        if (key !== SAVE_KEY) startupNote = 'Your saved plan could not be read, so your backup copy was loaded. ' + (lockedKeys.has(SAVE_KEY)
+          ? 'The unreadable copy could not be set aside, so this browser will not save over it: changes are NOT saved here. Download a backup file to keep your work.'
+          : 'The unreadable copy was kept aside, not deleted.');
+        return;
+      }
+      // Keep an unreadable copy aside so nothing typed later can overwrite it. If that isn't possible (storage full, or an
+      // older unreadable copy already there), lock the key instead: the app then refuses to write over it and says so.
+      const aside = storage.getItem(key + '-unreadable');
+      const keptAside = aside === raw || (!aside && storeWrite(key + '-unreadable', raw));
+      if (!keptAside) lockedKeys.add(key);
+      if (key === SAVE_KEY) startupNote = 'Your saved plan could not be read safely, so it was not loaded. ' + (keptAside
+        ? 'It was kept aside in this browser, not deleted. If you have a backup file, open it under Save & backup.'
+        : 'It could not be copied aside, so this browser will not save over it: changes you make now are NOT saved here. Download a backup file to keep new work.');
     }
-  } catch (e) { /* storage unavailable: start from the example */ }
+  }
   function migrate(st) {
     st.evidence = st.evidence || {};
     st.evidence.paidCashReceived = st.evidence.paidCashReceived || {};
@@ -30,9 +52,64 @@
     return st;
   }
   state = migrate(state);
-  function persist() { if (!touched) return; try { localStorage.setItem(SAVE_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ } }
-  function hasSavedPlan() { try { return !!localStorage.getItem(SAVE_KEY); } catch (e) { return false; } }
-  function say(msg) { const el = document.getElementById('status'); if (el) { el.textContent = msg; el.hidden = !msg; } }
+  // Before an example, a blank plan or an opened file replaces the plan, keep the plan on screen as a backup (one level).
+  // An example (isDemo) never overwrites a backup of a real plan; it may fill an empty backup or replace another example.
+  //   'saved'         the plan on screen is now the backup
+  //   'not-needed'    nothing of the person's own to keep (the untouched starting example, or any example)
+  //   'kept-existing' an example on screen, a real plan already in the backup: the backup is left alone
+  //   'failed'        a real plan could not be written to the backup: the caller must NOT replace anything
+  const isDemoText = (raw) => { try { return !!JSON.parse(raw).isDemo; } catch (e) { return false; } };
+  function secureBackup() {
+    if (!touched) return 'not-needed';
+    const existing = storeRead(SAVE_KEY + '-backup');
+    if (state.isDemo && existing && !isDemoText(existing)) return 'kept-existing';
+    if (!storeWrite(SAVE_KEY + '-backup', JSON.stringify(state))) return state.isDemo ? 'not-needed' : 'failed';
+    storeWrite(SAVE_KEY + '-backup-at', new Date().toISOString()); // only the "kept at" time; the backup itself is safe
+    return 'saved';
+  }
+  // Replace the plan on screen only once the current one is safely kept. Returns false (and changes nothing) otherwise.
+  function replacePlan(next, doneMsg, claimAutosave) {
+    const bk = secureBackup();
+    if (bk === 'failed') {
+      savePanel = true; render();
+      say('Could not make a backup of your current plan (this browser refused to store it), so nothing was replaced. Your plan is still here and unchanged. Use Download backup file to keep a copy before trying again.');
+      return false;
+    }
+    state = next; openOption = 0; touched = true;
+    const saved = persist();
+    say(doneMsg
+      + (bk === 'saved' ? ' Your previous plan was kept as a backup: Save & backup → Restore previous plan brings it back.' : '')
+      + (saved ? (claimAutosave ? ' It saves in this browser as you go.' : '') : ' It is NOT saved in this browser yet: see the red warning.'));
+    return true;
+  }
+  function backupInfo() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY + '-backup'); if (!raw) return null;
+      const plan = JSON.parse(raw); if (validatePlan(plan).length) return null;
+      return { plan, at: localStorage.getItem(SAVE_KEY + '-backup-at') || '' };
+    } catch (e) { return null; }
+  }
+  // Save the plan on screen. Returns whether it worked; a failure shows a warning that stays until a save succeeds.
+  function persist() {
+    if (!touched) return true;
+    const ok = storeWrite(SAVE_KEY, JSON.stringify(state));
+    setSaveProblem(ok ? '' : lockedKeys.has(SAVE_KEY)
+      ? 'Your changes are not saved in this browser, to protect an earlier saved plan that could not be read. Download a backup file to keep your work.'
+      : 'Your latest changes are not saved: this browser refused to store them (its storage may be full or blocked). Download a backup file now so you don\'t lose them.');
+    return ok;
+  }
+  function hasSavedPlan() { return !!storeRead(SAVE_KEY); }
+  let saidAt = 0;
+  function say(msg) { const el = document.getElementById('status'); if (el) { el.textContent = msg; el.hidden = !msg; saidAt = Date.now(); } }
+  let saveProblem = ''; // non-empty while the plan on screen is not saved
+  function setSaveProblem(msg) {
+    if (msg && !saveProblem) { const st = document.getElementById('status'); if (st && /saves in this browser/.test(st.textContent)) say(''); } // don't leave a stale "it saves" claim
+    saveProblem = msg; showSaveWarning();
+  }
+  function showSaveWarning() {
+    const el = document.getElementById('save-warning'); if (!el) return;
+    el.hidden = !saveProblem; const t = el.querySelector('[data-role="text"]'); if (t) t.textContent = saveProblem;
+  }
   // In-page two-click confirmation (browser confirm() dialogs are unavailable in some viewers).
   function armed(btn, label) {
     if (btn.dataset.armed === '1') { btn.dataset.armed = ''; return true; }
@@ -58,16 +135,20 @@
     for (let i = 0; i < keys.length - 1; i++) { if (o[keys[i]] == null) o[keys[i]] = {}; o = o[keys[i]]; }
     o[keys[keys.length - 1]] = val;
   }
+  // Help text sits under the label and is announced with the field (aria-describedby).
+  const helpId = (path) => 'help-' + path.replace(/[^A-Za-z0-9_-]/g, '-');
+  const helpFor = (path, help) => help ? `<small class="help" id="${esc(helpId(path))}">${help}</small>` : '';
+  const described = (path, help) => help ? ` aria-describedby="${esc(helpId(path))}"` : '';
   const num = (path, label, opts = {}) => {
     const v = getPath(state, path);
-    return `<label class="f${opts.wide ? ' wide' : ''}"><span>${label}</span><input type="number" inputmode="decimal" step="${opts.step || 'any'}" min="0" data-path="${path}" data-type="number" value="${v == null ? '' : esc(v)}" ${opts.placeholder ? `placeholder="${esc(opts.placeholder)}"` : ''}></label>`;
+    return `<label class="f${opts.wide ? ' wide' : ''}"><span>${label}</span>${helpFor(path, opts.help)}<input type="number" inputmode="decimal" step="${opts.step || 'any'}" min="0" data-path="${path}" data-type="number" value="${v == null ? '' : esc(v)}"${described(path, opts.help)} ${opts.placeholder ? `placeholder="${esc(opts.placeholder)}"` : ''}></label>`;
   };
-  const pct = (path, label) => {
+  const pct = (path, label, help) => {
     const v = getPath(state, path);
-    return `<label class="f"><span>${label}</span><input type="number" inputmode="decimal" step="any" min="0" max="100" data-path="${path}" data-type="pct" value="${v == null ? '' : esc(Math.round(v * 1000) / 10)}"></label>`;
+    return `<label class="f"><span>${label}</span>${helpFor(path, help)}<input type="number" inputmode="decimal" step="any" min="0" max="100" data-path="${path}" data-type="pct" value="${v == null ? '' : esc(Math.round(v * 1000) / 10)}"${described(path, help)}></label>`;
   };
   const txt = (path, label, cls = '') => `<label class="f ${cls}"><span>${label}</span><input type="text" data-path="${path}" value="${esc(getPath(state, path))}"></label>`;
-  const chk = (path, label) => `<label class="chk"><input type="checkbox" data-path="${path}" data-type="bool" ${getPath(state, path) ? 'checked' : ''}> ${label}</label>`;
+  const chk = (path, label, help) => `<label class="chk"><input type="checkbox" data-path="${path}" data-type="bool" ${getPath(state, path) ? 'checked' : ''}${described(path, help)}> <span>${label}${helpFor(path, help)}</span></label>`;
   const selGrouped = (path, label, options) => {
     const v = getPath(state, path) || '';
     const groups = [...new Set(options.map((o) => o[2]))];
@@ -202,21 +283,21 @@
     return `${optionTabs('Fill this in for each option.')}
       ${product ? '<p class="hint">If sellers collect orders and money <b>before</b> you order from the supplier, the items you must pay for is usually 0 (unless the supplier has a minimum). If you must buy stock up front, enter that quantity: you pay for it whether it sells or not.</p>' : ''}
       <div class="fields">
-        ${num(p + '.venueQuote.perParticipant', product ? 'Supplier cost per item, including tax and shipping ($)' : `${cap(t.venue)} charge per ${t.one}, including tax and service charges ($)`)}
-        ${num(p + '.venueQuote.minimumParticipants', product ? 'Items you must pay for no matter how many sell: the supplier minimum or your pre-order (0 if none)' : `Minimum ${t.many} you must pay for (0 if none)`, { step: 1 })}
-        ${num(p + '.venueQuote.flatFee', product ? 'Flat fee from the supplier ($, 0 if none)' : 'Flat fee, rental or buyout ($, 0 if none)')}
-        ${num(p + '.venueQuote.minimumSpend', product ? 'Minimum order total ($, 0 if none)' : 'Minimum for the whole bill ($, 0 if none). A separate food-and-drink minimum on top of the per-person charge goes under one-time costs instead')}
-        ${num(p + '.capacity', product ? 'Most items you could realistically get and sell (the planner never counts more than this)' : `Most ${t.many} the ${t.venue} can take`, { step: 1 })}
-        ${t.groupName ? num(p + '.groupSize', `${cap(t.groupName)} size (1 if ${t.many} only sign up one at a time)`, { step: 1 }) : ''}
+        ${num(p + '.venueQuote.perParticipant', product ? 'Supplier cost per item ($)' : `${cap(t.venue)} charge per ${t.one} ($)`, { help: product ? 'What you pay the supplier for each item, including tax and shipping. This is your cost, not your selling price.' : 'From the written quote. Include sales tax and any service charge or gratuity.' })}
+        ${num(p + '.venueQuote.minimumParticipants', product ? 'Items you must pay for even if they don’t sell' : `Minimum ${t.many} you must pay for`, { step: 1, help: product ? 'The supplier’s minimum order, or stock you buy in advance. Enter 0 if sellers collect orders first.' : `Some contracts charge for a minimum number of ${t.many} even if fewer come. Enter 0 if there is none.` })}
+        ${num(p + '.venueQuote.flatFee', product ? 'Flat fee from the supplier ($)' : 'Flat fee, rental or buyout ($)', { help: 'A fixed charge that stays the same however many come. Enter 0 if there is none.' })}
+        ${num(p + '.venueQuote.minimumSpend', product ? 'Minimum order total ($)' : 'Minimum for the whole bill ($)', { help: product ? 'If the order must reach a dollar amount, enter it. Enter 0 if there is none.' : 'If the whole bill must reach a dollar amount, enter it. Enter 0 if there is none. A separate food-and-drink minimum on top of the per-person charge goes under one-time costs.' })}
+        ${num(p + '.capacity', product ? 'Most items you could realistically get and sell' : `Most ${t.many} the ${t.venue} can take`, { step: 1, help: product ? 'The planner never counts more than this.' : 'The planner never counts more than this.' })}
+        ${t.groupName ? num(p + '.groupSize', `${cap(t.groupName)} size`, { step: 1, help: `How many make up one ${t.groupName}. Enter 1 if ${t.many} sign up one at a time.` }) : ''}
       </div>
       ${t.groupName && Number(o.groupSize) > 1 ? `<div class="checks">${chk(p + '.wholeGroupsOnly', `${cap(t.many)} can only come as full ${t.groupName}s`)}</div>` : ''}
       <h3 class="sub">${product ? 'Deposit to the supplier' : 'Deposit'}</h3>
-      <div class="fields">${num(p + '.deposit.amount', product ? 'Deposit paid before ordering ($, 0 if none)' : 'Deposit amount ($)')}</div>
-      <div class="checks">${chk(p + '.deposit.creditedTowardBill', 'The deposit counts toward the final bill')}${chk(p + '.deposit.refundable', 'The deposit is refundable')}</div>
-      <div class="callout ${o.upfrontFundingConfirmed ? 'ok' : ''}">${chk(p + '.upfrontFundingConfirmed', 'The treasurer confirmed the club can cover money due before the event, even if sign-ups come in slowly')}<span>If cash needed up front is more than cash in hand, this stays on the “must verify” list until checked.</span></div>
+      <div class="fields">${num(p + '.deposit.amount', product ? 'Deposit paid before ordering ($)' : 'Deposit amount ($)', { help: 'Money you pay when you sign or order. Enter 0 if there is none.' })}</div>
+      <div class="checks">${chk(p + '.deposit.creditedTowardBill', 'The deposit counts toward the final bill', 'It is part of the bill, paid early.')}${chk(p + '.deposit.refundable', 'The deposit is refundable', 'You get it back if you cancel in time.')}</div>
       <h3 class="sub">Cancellation</h3>
-      <div class="fields">${num(p + '.cancellationOwed', product ? 'Total you would owe the supplier if you cancel after ordering, including any deposit you would lose ($, 0 if you can cancel for free, blank = not known yet)' : 'Total you would owe if you cancel after the deadline on the quote, including any deposit you would lose ($, blank = not known yet)', { placeholder: 'not known yet', wide: true })}</div>
-      <div class="callout ${o.quoteVerified ? 'ok' : ''}">${chk(p + '.quoteVerified', 'I have this quote in writing')}<span>Until this is checked, the result will say “Not enough evidence to decide yet.”</span></div>
+      <div class="fields">${num(p + '.cancellationOwed', product ? 'Owed to the supplier if you cancel after ordering ($)' : 'Owed if you cancel after the quote’s deadline ($)', { placeholder: 'not known yet', wide: true, help: `Copy this from the ${product ? 'supplier sheet' : 'quote'}, including any deposit you would lose. Enter 0 if you can cancel for free. Leave it blank if you don’t know yet: the results will list it as missing.` })}</div>
+      <div class="callout ${o.quoteVerified ? 'ok' : ''}">${chk(p + '.quoteVerified', 'I have this quote in writing')}<span>Until this is checked, the result will say “Not enough evidence to decide yet.” It unchecks itself if you change a quote number.</span></div>
+      <div class="callout ${o.upfrontFundingConfirmed ? 'ok' : ''}">${chk(p + '.upfrontFundingConfirmed', 'The treasurer confirmed the club can cover money due before the event, even if sign-ups come in slowly')}<span>Only needed if the deposit and bills due in advance are more than the cash you have now.</span></div>
       <details class="qs"><summary>Questions to ask the ${t.venue} before signing</summary><ul class="plain">${questionsFor(o).map((q) => `<li>${esc(q)}</li>`).join('')}</ul></details>`;
   }
 
@@ -228,9 +309,9 @@
     const gs = o.groupShare !== undefined ? 'groupShare' : (o.foursomeShare !== undefined ? 'foursomeShare' : 'groupShare');
     return `${optionTabs()}
       <div class="fields">
-        ${num(p + '.price', t.survey === 'buy' ? 'Selling price per item ($)' : `Price per ${t.one} ($${t.proceeds ? ', 0 if admission is free' : ''})`)}
-        ${group ? num(`${p}.${gp}`, `Price for a full ${t.groupName} of ${size} ($, blank = ${size} × the single price)`, { placeholder: String((Number(o.price) || 0) * size) }) : ''}
-        ${group ? pct(`${p}.${gs}`, `Your guess: what % of ${t.many} will buy as a full ${t.groupName}?`) : ''}
+        ${num(p + '.price', t.survey === 'buy' ? 'Selling price per item ($)' : `Price per ${t.one} ($)`, { help: t.proceeds ? 'Enter 0 if admission is free.' : 'The price on the sign-up or order form.' })}
+        ${group ? num(`${p}.${gp}`, `Price for a full ${t.groupName} of ${size} ($)`, { placeholder: String((Number(o.price) || 0) * size), help: `Leave blank if a ${t.groupName} pays ${size} × the single price.` }) : ''}
+        ${group ? pct(`${p}.${gs}`, `What % of ${t.many} will buy as a full ${t.groupName}? (your guess)`, 'Used only to work out ticket money. It does not change how many come.') : ''}
       </div>
       <p class="hint">These exact prices go into the supporter survey, so a “Yes” always means yes at this price.</p>`;
   }
@@ -410,6 +491,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       </div>
       <div class="row-actions"><button class="btn" data-action="copy-survey" ${snapshotReady() ? '' : 'disabled'}>Copy survey text</button>
       ${snapshotReady() ? '<span class="hint">Paste it into Google Forms or an email. Send it to adult supporters only.</span>' : '<span class="hint">Fill in the first five boxes to copy the survey.</span>'}</div>
+      ${state.options.length > 3 ? '<p class="hint">The survey asks about your first three options only. Remove or reorder options on step 2 if a different one matters more.</p>' : ''}
       <details class="qs" open><summary>Preview the survey</summary><pre id="survey" class="survey">${esc(surveyText())}</pre></details>`;
   }
 
@@ -488,6 +570,14 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   function statusClass(s) {
     return { not_enough_evidence: 'st-unknown', not_viable_as_configured: 'st-bad', high_risk: 'st-warn', supported_with_open_items: 'st-warn', supported_by_current_evidence: 'st-ok' }[s];
   }
+  // What each status means, in one plain sentence. Shown under the badge and in the guide.
+  const STATUS_MEANING = {
+    not_enough_evidence: 'A written quote or real evidence of demand is still missing, or paid sign-ups plus named “yes” answers don’t yet reach break-even. This is a normal, useful answer: collect the missing pieces before anyone signs.',
+    not_viable_as_configured: 'Even if every spot sells, ticket money and firm sponsorship don’t cover the costs at these prices and terms. Change the price, costs or format, or don’t sign.',
+    high_risk: 'Under the numbers you entered, this plan can lose money, or it only works if assumed income (add-ons, other income, auction money) actually arrives.',
+    supported_with_open_items: 'The numbers clear break-even with the evidence you have, but some items below still need checking. It is not a guarantee.',
+    supported_by_current_evidence: 'The numbers clear break-even with current evidence and nothing is flagged. It still isn’t a guarantee of profit, and it doesn’t make a contract safe.',
+  };
   function statusIcon(s) { return { not_enough_evidence: '?', not_viable_as_configured: '✕', high_risk: '!', supported_with_open_items: '…', supported_by_current_evidence: '✓' }[s]; }
 
   function analyse(o) {
@@ -558,48 +648,68 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     const auction = t.proceeds && (d.proceedsLow > 0 || midProceeds > 0) ? ` Break-even leaves out auction and raffle money because bids aren't promised; our middle estimate for it is ${round(midProceeds)}, which is included in the middle-case net of ${round(P.middle.net)}.` : '';
     if (!d.breakEven.reachableWithinCapacity && d.conditional && d.conditional.reachableWithinCapacity) return `Tickets and firm sponsorship alone can't cover costs, even at full capacity of ${d.breakEven.maxFeasible} ${t.many}. This only works if our low-case ${d.conditional.uses.join(' and ')} come in, and none of that is promised.`;
     if (!d.breakEven.reachableWithinCapacity) return `Even at full capacity of ${d.breakEven.maxFeasible} ${t.many}, this option loses money on collected and committed sponsorship as currently priced, so it should not go ahead as configured.${auction}`;
-    return `With ${money(firm)} in collected and committed sponsorship, we need ${d.breakEven.participants} ${t.survey === 'buy' ? 'items sold' : 'paying ' + t.many} to break even. Right now we have ${have} (${t.survey === 'buy' ? 'paid orders' : 'paid registrations'} plus named survey “yes” answers)${d.breakEven.participants > have ? `, a gap of ${d.breakEven.participants - have}` : `, which meets the count check only. Named “yes” answers are not ${t.survey === 'buy' ? 'paid orders' : 'paid registrations'}`}. ${t.survey === 'buy' ? 'If nothing sells' : 'If nobody registers'}, we would be at about ${round(d.worst.netIfNobodyRegisters)}.${auction}`;
+    return `With ${money(firm)} in collected and committed sponsorship, we need ${d.breakEven.participants} ${t.survey === 'buy' ? 'items sold' : 'paying ' + t.many} to break even. Right now we have ${have} (${t.survey === 'buy' ? 'paid orders' : 'paid registrations'} plus named survey “yes” answers)${d.breakEven.participants > have ? `, a gap of ${d.breakEven.participants - have}` : `, which meets the count check only. Named “yes” answers are not ${t.survey === 'buy' ? 'paid orders' : 'paid registrations'}`}. ${t.survey === 'buy' ? 'If nothing sells' : 'If nobody registers'}, we would be at ${round(d.worst.netIfNobodyRegisters)}.${auction}`;
+  }
+
+  // "Where the numbers stand": what is in writing or on record, and what is still an estimate or missing.
+  function standing(o, d) {
+    const ev = d.evidence.state;
+    const items = [
+      [o.quoteVerified, `${cap(T(o).venue)} quote in writing`],
+      [o.costsVerified, 'Other costs are real quotes'],
+      [d.cancel != null, 'Cancellation terms entered'],
+      [ev === 'current', ev === 'none' ? 'No survey answers yet' : 'Survey answers are for the current offer'],
+      [d.paid > 0, d.paid > 0 ? `${d.paid} already paid` : 'Nobody has paid yet'],
+    ];
+    if (d.paid > 0) items.push([d.firm.upfront.registrationCash != null, 'Money received entered']);
+    if (d.exposure.shortBeforeEvent > 0) items.push([!!o.upfrontFundingConfirmed, 'Club confirmed it can cover money due first']);
+    return `<ul class="standing" aria-label="Where the numbers stand">${items.map(([ok, label]) => `<li class="${ok ? 'yes' : 'no'}"><span aria-hidden="true">${ok ? '✓' : '–'}</span>${esc(label)}<span class="sr-only">: ${ok ? 'yes' : 'not yet'}</span></li>`).join('')}</ul>`;
   }
 
   function renderSummary(all) {
     return state.options.map((o, i) => {
-      const a = all[i], d = a.dec, P = a.proj, t = T(o);
+      const a = all[i], d = a.dec, P = a.proj, t = T(o), x = d.exposure;
+      const unit = t.survey === 'buy' ? 'items sold' : `paying ${t.many}`;
+      const nobody = t.survey === 'buy' ? 'nothing sells' : 'nobody comes';
+      const have = d.paid + d.namedCounted;
+      const gapOpen = x.shortBeforeEvent > 0 && !o.upfrontFundingConfirmed;
+      const moreLoss = x.worstOnChartLoss > x.largestLoss; // the two-case figure is not a maximum; say so when the chart goes lower
       const top = a.sens.results[0];
-      const lines = [];
-      lines.push(...d.reasons);
-      if (d.breakEven.reachableWithinCapacity && d.breakEven.participants === 0) lines.push(`Collected and committed sponsorship alone would cover costs even with zero ${t.many}. Confirm sponsors would still pay if the event is small or canceled.`);
-      else if (d.breakEven.reachableWithinCapacity) lines.push(`With only collected and committed sponsorship, you need ${d.breakEven.participants} ${t.survey === 'buy' ? 'items sold' : 'paying ' + t.many} to cover costs (most possible: ${d.breakEven.maxFeasible}).`);
-      lines.push(`At the low number you entered (${P.conservative.participants} ${t.many}), projected net is ${hm(P.conservative.net)}; at the middle ${P.middle.participants}, ${hm(P.middle.net)}.`);
-      if (d.worst.contractualFloor > 0) lines.push(`From the minimums and deposit you entered, the venue bill at low turnout is about ${hm(d.worst.contractualFloor)}. That isn't a cancellation fee, and it only applies if those are the terms you actually sign.`);
-      if (d.cancel) lines.push(`If you cancel after the quote's deadline: about ${hm(d.cancel.owedToVenue)} to the venue, plus ${hm(d.cancel.alreadySpent)} already spent on items paid in advance.`);
+      const why = [...d.reasons];
+      if (d.breakEven.reachableWithinCapacity && d.breakEven.participants === 0) why.push(`Collected and committed sponsorship alone would cover costs even with zero ${t.many}. Confirm sponsors would still pay if the event is small or canceled.`);
       const midP = Number((o.scenarioProceeds || {}).middle) || 0;
-      if (t.proceeds && (d.proceedsLow > 0 || midP > 0)) lines.push(`Why break-even and middle-case net look different: break-even leaves out auction and raffle money because bids aren't promised. Your scenarios include about ${hm(d.proceedsLow)} (low) and ${hm(midP)} (middle) of it.`);
-      if (top) lines.push(`The single assumption that moves the middle case most: “${top.label}” (${top.change >= 0 ? '+' : ''}${money(top.change)}).`);
-      if (d.firm.upfront.gap > 0) lines.push(`You would need ${money(d.firm.upfront.gap)} more cash than you have in hand${o.upfrontFundingConfirmed ? ' (the club has confirmed it can cover this)' : ''} before ${t.survey === 'buy' ? 'order money comes in' : 'the event'}.`);
-      if (P.middle.sponsorshipByStatus.hoped > 0) lines.push(`${money(P.middle.sponsorshipByStatus.hoped)} of sponsorship is only hoped-for and is excluded from break-even.`);
-      lines.push(t.survey === 'buy'
-        ? `Evidence so far: ${d.paid} items already paid for; ${d.named} items from named “yes” answers${d.named !== d.namedCounted ? ` (not counted: they were for different or unrecorded terms)` : ''}; ${d.definitely} from anonymous “yes”; ${d.responses} survey responses. Survey interest is not a paid order.`
-        : `Evidence so far: ${d.paid} paid sign-ups or tickets; ${d.named} named “yes” answers${d.named !== d.namedCounted ? ` (not counted: they were for different or unrecorded terms)` : ''}; ${d.definitely} anonymous “yes”; ${d.responses} survey responses. Survey interest is not a paid sign-up.`);
+      if (t.proceeds && (d.proceedsLow > 0 || midP > 0)) why.push(`Why break-even and the likely case look different: break-even leaves out auction and raffle money because bids aren't promised. Your low and likely cases include ${hm(d.proceedsLow)} and ${hm(midP)} of it.`);
+      if (d.worst.contractualFloor > 0) why.push(`From the minimums and deposit you entered, the ${t.venue} bill is at least ${hm(d.worst.contractualFloor)} even if ${nobody}. That applies only if those are the terms you actually sign.`);
+      if (P.middle.sponsorshipByStatus.hoped > 0) why.push(`${hm(P.middle.sponsorshipByStatus.hoped)} of sponsorship is only hoped-for and is left out of break-even.`);
       const vh = P.middle.volunteerHours;
-      const beGap = d.breakEven.reachableWithinCapacity ? Math.max(0, d.breakEven.participants - d.paid - d.namedCounted) : 0;
-      const perHour = vh ? P.middle.net / vh : null;
-      return `<div class="sum"><h4><span class="badge ${statusClass(d.status)}"><i>${statusIcon(d.status)}</i>${esc(E.STATUS_LABELS[d.status])}</span> ${esc(o.name)}</h4>
-        <p class="aloud"><b>What to tell the board (30 seconds):</b> ${esc(readAloud(o, d, P, (x) => money(E.roundHeadline(x))))}</p>
+      if (vh) why.push(`Volunteer time: about ${vh} hours${vh && P.middle.net > 0 ? `, roughly ${hm(P.middle.net / vh)} raised per hour in the likely case` : ''}.`);
+      const matters = [];
+      if (top) matters.push(`Biggest effect on the likely case: “${top.label}” changes it by ${top.change >= 0 ? '+' : ''}${hm(top.change)}.`);
+      a.sens.results.slice(1, 3).forEach((r) => matters.push(`“${r.label}”: ${r.change >= 0 ? '+' : ''}${hm(r.change)}.`));
+      if (d.conditional && d.breakEven.reachableWithinCapacity && d.conditional.participants !== d.breakEven.participants) matters.push(`Your assumed ${d.conditional.uses.join(' and ')} would lower break-even to ${d.conditional.participants}${d.conditional.reachableWithinCapacity ? '' : ' (not reachable)'}, but they aren't promised.`);
+      return `<article class="sum" aria-labelledby="sum-${i}">
+        <h3 id="sum-${i}" class="sum-title">${esc(o.name)}</h3>
+        <p class="status-line"><span class="badge ${statusClass(d.status)}"><i aria-hidden="true">${statusIcon(d.status)}</i>${esc(E.STATUS_LABELS[d.status])}</span></p>
+        <p class="meaning">${esc(STATUS_MEANING[d.status])}</p>
         <div class="cards">
-          <div class="card ${beGap > 0 || !d.breakEven.reachableWithinCapacity ? 'bad' : ''}"><span>Break-even vs. evidence</span><b>${d.breakEven.reachableWithinCapacity ? d.breakEven.participants : '—'} needed · ${d.paid + d.namedCounted} paid or named</b><em>${esc(t.many)} needed on firm money${t.proceeds ? ', not counting auction bids,' : ''} vs. paid + named “yes” answers. Named answers are not money.</em></div>
-          <div class="card"><span>${t.survey === 'buy' ? 'Cash needed up front' : 'Cash needed before event day'}</span><b>${hm(d.firm.upfront.required)}</b><em>firm money only: deposit + bills due before the event; short by ${hm(d.firm.upfront.gap)} vs. cash in hand${d.firm.upfront.gap > 0 && !o.upfrontFundingConfirmed ? ' (not yet covered)' : ''}</em></div>
-          <div class="card"><span>Contract floor</span><b>${hm(d.worst.contractualFloor)}</b><em>the least the ${esc(t.venue)} bills even if ${t.survey === 'buy' ? 'nothing sells' : 'nobody comes'}, from the minimums and deposit you entered</em></div>
-          <div class="card ${d.worst.netIfNobodyRegisters < 0 ? 'bad' : ''}"><span>${t.survey === 'buy' ? 'Net if nothing sells' : 'Net if nobody registers'}</span><b>${hm(d.worst.netIfNobodyRegisters)}</b><em>collected sponsor cash minus the contract floor and all one-time costs, including ones paid later</em></div>
-          <div class="card"><span>Middle-case net</span><b>${hm(P.middle.net)}</b><em>at the low number (${P.conservative.participants}): ${hm(P.conservative.net)}${t.proceeds ? '. Includes your auction and raffle estimate' : ''}</em></div>
-          <div class="card"><span>Volunteer hours</span><b>${vh} h</b><em>${perHour == null ? '—' : `≈ ${money(Math.round(perHour))} net per hour (middle)`}</em></div>
+          <div class="card ${gapOpen ? 'bad' : ''}"><span>${t.survey === 'buy' ? 'Cash needed up front' : 'Cash needed before event day'}</span><b>${hm(x.cashNeededBeforeEvent)}</b><em>Deposit and bills due in advance. You have ${hm(x.cashInHand)} in hand${x.shortBeforeEvent > 0 ? `, so you are short ${hm(x.shortBeforeEvent)}${o.upfrontFundingConfirmed ? ' (the club confirmed it can cover this)' : ' (not yet covered)'}` : ''}.${d.firm.upfront.registrationCashUnknown ? ' Money received from people who paid is not entered yet.' : ''}</em></div>
+          <div class="card ${x.largestLoss > 0 || moreLoss ? 'bad' : ''}"><span>Loss if ${nobody} or you cancel</span><b>${hm(x.largestLoss)}${x.cancellationKnown ? '' : ' or more'}</b><em>If ${nobody}: ${hm(x.lossIfNobodyComes)}. If you cancel after the deadline: ${x.cancellationKnown ? hm(x.lossIfCanceled) : 'not entered yet'}. ${moreLoss ? `<strong>Holding it can lose more:</strong> at ${x.worstOnChart.participants} ${esc(t.many)}, firm money comes out at ${hm(x.worstOnChart.net)} (see the chart).` : 'Other turnouts can lose more; check the chart.'} Uses only the terms you entered.</em></div>
+          <div class="card ${!d.breakEven.reachableWithinCapacity || d.breakEven.participants > have ? 'bad' : ''}"><span>Needed to break even</span><b>${d.breakEven.reachableWithinCapacity ? `${d.breakEven.participants} ${esc(unit)}` : 'Not reachable'}</b><em>${d.breakEven.reachableWithinCapacity ? '' : `Even all ${d.breakEven.maxFeasible} wouldn't cover costs. `}${d.breakEven.reachableWithinCapacity && d.paid > 0 && d.breakEven.participants <= d.paid ? `Already reached by the ${d.paid} who have paid. ` : ''}Firm money only${t.proceeds ? ', no auction bids' : ''}. You have ${d.paid} paid + ${d.namedCounted} named “yes” = ${have}. Named answers are not money.</em></div>
+          <div class="card"><span>Likely case (your estimate)</span><b>${hm(P.middle.net)}</b><em>Low case ${hm(P.conservative.net)}, high case ${hm(P.optimistic.net)}. These use your own numbers and are not predictions.${t.proceeds ? ' They include your auction and raffle estimates.' : ''}</em></div>
         </div>
-        <ul class="plain">${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
-        ${d.missing.length ? `<p><b>Must verify before committing:</b></p><ul class="plain miss">${d.missing.map((m) => `<li>${esc(m)}</li>`).join('')}</ul>` : ''}</div>`;
+        <p class="aloud"><b>What to tell the board (30 seconds):</b> ${esc(readAloud(o, d, P, hm))}</p>
+        <div class="sum-grid">
+          <section><h4>Why</h4><ul class="plain">${why.map((l) => `<li>${esc(l)}</li>`).join('')}</ul></section>
+          <section><h4>What matters most</h4><ul class="plain">${matters.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>
+            <h4>Where the numbers stand</h4>${standing(o, d)}</section>
+        </div>
+        ${d.missing.length ? `<section class="verify"><h4>Must verify before signing</h4><ul class="plain miss">${d.missing.map((m) => `<li>${esc(m)}</li>`).join('')}</ul></section>` : '<p class="hint">Nothing is flagged, but check the “Before anyone signs” list below.</p>'}
+      </article>`;
     }).join('');
   }
 
-  let exact = false;
-  const hm = (x) => exact ? money(x) : '≈\u2009' + money(E.roundHeadline(x));
+  // Headline money: whole dollars, never rounded further (rounding to $50 could understate cash needed or a loss).
+  const hm = (x) => money(Math.round(Number(x) || 0));
 
   function copyText(text, btn) {
     const done = () => { const o = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = o; }, 1500); };
@@ -616,12 +726,15 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   function boardMemo() {
     const L = [];
     L.push(`# ${state.eventName}`);
-    if (state.isDemo) L.push('**FICTIONAL DEMONSTRATION DATA — not a recommendation for any real event.**');
-    L.push(`Fundraising target: ${money(state.settings.fundraisingTarget || 0)} net. Figures rounded; exact math in the planner.`);
+    if (state.isDemo) L.push('**FICTIONAL EXAMPLE: every number is made up. Not a recommendation for any real event.**');
+    L.push(`Fundraising target: ${money(state.settings.fundraisingTarget || 0)} after costs. Figures are rounded to the nearest dollar.`);
     for (const o of state.options) {
       const a = analyse(o), d = a.dec, P = a.proj;
       L.push('', `## ${o.name}`, `**Status: ${E.STATUS_LABELS[d.status]}**`);
-      L.push('', `> **Read-aloud (30 seconds):** ${readAloud(o, d, P, (x) => money(E.roundHeadline(x)))}`, '');
+      L.push(`${STATUS_MEANING[d.status]}`);
+      L.push('', `> **Read-aloud (30 seconds):** ${readAloud(o, d, P, hm)}`, '');
+      const xp = d.exposure, nobodyM = T(o).survey === 'buy' ? 'nothing sells' : 'nobody comes';
+      L.push(`- Cash needed before the event: ${hm(xp.cashNeededBeforeEvent)}. Loss if ${nobodyM} or you cancel after the deadline, under the terms entered: ${hm(xp.largestLoss)}${xp.cancellationKnown ? '' : ' or more (cancellation terms not entered)'}. ${xp.worstOnChartLoss > xp.largestLoss ? `Holding it can lose more: at ${xp.worstOnChart.participants} ${T(o).many}, firm money comes out at ${hm(xp.worstOnChart.net)}.` : 'Other turnouts can lose more; see the chart in the planner.'}`);
       d.reasons.forEach((r) => L.push(`- ${r}`));
       L.push(`- Break-even (firm sponsorship only): ${d.breakEven.reachableWithinCapacity ? d.breakEven.participants + ' ' + T(o).many : 'not reachable within capacity'} of ${d.breakEven.maxFeasible} feasible.`);
       L.push(`- Net: conservative ${hm(P.conservative.net)} (${P.conservative.participants}), middle ${hm(P.middle.net)} (${P.middle.participants}), optimistic ${hm(P.optimistic.net)} (${P.optimistic.participants}).`);
@@ -629,7 +742,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       L.push(`- Worst case if nobody registers: ${hm(d.worst.netIfNobodyRegisters)}. Volunteer hours: ${P.middle.volunteerHours}.`);
       L.push(`- Evidence: ${d.paid} paid${P.middle.upfront.registrationCashUnknown ? ' (amount received not entered)' : ''}, ${d.named} named "yes"${d.named !== d.namedCounted ? ' (not counted: collected for different or unrecorded terms)' : ''}, ${d.definitely} anonymous "yes", ${d.responses} responses.`);
       if (d.missing.length) { L.push('- Must verify before signing:'); d.missing.forEach((m) => L.push(`  - ${m}`)); }
-      if (d.cancel) L.push(`- If canceled after the quote's deadline: about ${money(E.roundHeadline(d.cancel.owedToVenue))} to the venue plus ${money(E.roundHeadline(d.cancel.alreadySpent))} already spent.`);
+      if (d.cancel) L.push(`- If canceled after the quote's deadline: ${hm(d.cancel.owedToVenue)} to the ${T(o).venue} plus ${hm(d.cancel.alreadySpent)} already spent.`);
     }
     L.push('', '## Before anyone signs'); SIGNING_QUESTIONS.forEach((q) => L.push(`- [ ] ${q}`));
     L.push('', '_Planning estimates only. No guarantee of results; no tax or legal determinations._');
@@ -655,6 +768,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   function readHash() {
     const h = (location.hash || '').slice(1);
     if (h === 'results') { view = 'results'; return; }
+    if (h === 'guide') { view = 'guide'; return; }
     const k = STEPS.findIndex((st) => 'step-' + st.id === h);
     if (k >= 0) { const back = view === 'wizard' && k === stepIdx - 1; view = 'wizard'; openOption = back ? state.options.length - 1 : 0; stepIdx = k; return; }
     view = 'home';
@@ -673,7 +787,8 @@ Report raw counts, never percentages applied to a whole school or community. Sur
           <button class="btn ghost" data-action="start-demo" data-demo="gala">Try a gala vs. product sale example</button>
           <button class="btn ghost" data-action="start-blank">Start a new plan</button>
         </div>
-        <p class="hint">Free. Nothing to install. Your plan stays in your own browser.</p>
+        <p class="hint">Free. Nothing to install. No account. New here? Read <a href="#guide">How to use</a> first (5 minutes).</p>
+        <p class="storage-note"><b>Where your plan is kept:</b> only in this browser, on this device. It is not backed up online and does not move to your phone or another computer. Use <b>Save &amp; backup → Download backup file</b> to keep a copy.</p>
       </section>
       <section class="how">
         <div><span class="num">1</span><h3>Enter your real quotes</h3><p>Venue or supplier prices, minimums, deposits, prizes. The planner works out what you owe even if turnout or sales are low.</p></div>
@@ -689,6 +804,63 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         </ul>
         <p>Without a written quote and some real evidence of demand (paid sign-ups or survey answers), it says <b>“Not enough evidence to decide yet.”</b> That's often the right answer. Even its strongest result means only that your numbers hold up so far. It never means the event will make money.</p>
       </section>`;
+  }
+
+  // Real information to collect before entering a plan. Shown in the guide; mirrored in docs/START_HERE.md.
+  const COLLECT = [
+    ['Written quote from the venue, course or supplier', 'Price per person or item, what it includes, tax and service charges, minimum number or minimum bill, flat fees, and how many it can hold.'],
+    ['Deposit terms', 'How much, when it is due, whether it counts toward the bill, and whether (and until when) it is refundable.'],
+    ['Cancellation terms', 'What you would owe if you cancel, and the deadline. Copy the dollar amount from the quote.'],
+    ['Your prices', 'The single price and any group or table price you would actually put on the form.'],
+    ['Other costs', 'Prizes, food not in the quote, printing, signs, insurance, supplies. Mark which ones are paid before the event.'],
+    ['Sponsor commitments', 'Who has paid (collected), who has promised in writing (committed), and who you have only asked (hoped-for). Donated items, and which cost they replace.'],
+    ['Actual receipts', 'How many people have paid, and the total money actually received, from your records or bank.'],
+    ['Supporter survey totals', 'How many answered, and per option: “yes” with a name, anonymous “yes”, and “maybe”. Counts only, no names.'],
+    ['Volunteer hours', 'Hours the event needs, and hours your volunteers can realistically give.'],
+    ['Who signs', 'Whether the club, the school or the district signs and holds the money, and whether approval or insurance is required.'],
+  ];
+
+  function viewGuide() {
+    return `<article class="guide">
+      <p class="eyebrow">How to use</p>
+      <h1 tabindex="-1">Start here</h1>
+      <p class="lede-s">This planner helps a volunteer decide whether a fundraiser is worth committing to <b>before</b> anyone signs a contract or orders stock. It does the arithmetic on your real quotes and real supporter answers. It doesn't predict turnout, give tax or legal advice, or promise a result.</p>
+
+      <section class="panel"><h2>1. Practice with the made-up example (5 minutes)</h2>
+        <ol class="steps">
+          <li>On the home page, choose <b>Try a golf example</b>. A yellow bar reminds you that every number is made up.</li>
+          <li>Click <b>Next</b> through the steps to see what each one asks. You don't need to change anything.</li>
+          <li>Choose <b>See results</b>. Each option shows a status, four answers (cash needed first, what you'd lose if nobody comes or you cancel, how many are needed to break even, and the likely case) and a list of things to verify.</li>
+          <li>Try one change: go back to <b>What will you charge?</b>, lower the shotgun-start price to $60 and the foursome price to $240, then look at the results again. The status changes to “Not viable as currently configured”.</li>
+        </ol>
+      </section>
+
+      <section class="panel"><h2>2. Collect your real information</h2>
+        <p class="hint">You can start with some of it missing. Anything missing shows up on the results page under “Must verify before signing”.</p>
+        <ul class="plain miss">${COLLECT.map(([h, d]) => `<li><b>${esc(h)}.</b> ${esc(d)}</li>`).join('')}</ul>
+      </section>
+
+      <section class="panel"><h2>3. Enter your plan</h2>
+        <p>Choose <b>Start a new plan</b> on the home page and answer one step at a time. Copy numbers from written quotes and records. If you are not sure of a number, leave it blank or enter your best guess and leave “in writing” unchecked. The planner will treat it as unconfirmed.</p>
+      </section>
+
+      <section class="panel"><h2>4. Save and keep a backup</h2>
+        <ul class="plain">
+          <li>Your plan saves by itself, but <b>only in this browser on this device</b>. It isn't stored online and won't appear on another computer or phone.</li>
+          <li>Clearing your browser history or site data, or using a private window, can erase it.</li>
+          <li>To keep a copy, open <b>Save &amp; backup</b> and choose <b>Download backup file</b>. Keep the file somewhere safe, such as your documents folder or email it to yourself.</li>
+          <li>To open the plan later or on another computer, open <b>Save &amp; backup</b>, choose <b>Open a backup file</b> and pick that file.</li>
+          <li>Before an example, a new plan or an opened file replaces your plan, the old one is kept as a backup in this browser. <b>Restore previous plan</b> swaps it back.</li>
+        </ul>
+      </section>
+
+      <section class="panel"><h2>5. Read the results</h2>
+        <dl class="statuses">${Object.keys(STATUS_MEANING).map((k) => `<dt><span class="badge ${statusClass(k)}"><i aria-hidden="true">${statusIcon(k)}</i>${esc(E.STATUS_LABELS[k])}</span></dt><dd>${esc(STATUS_MEANING[k])}</dd>`).join('')}</dl>
+        <p><b>Firm money</b> means ticket or sales money plus sponsorship that is collected or promised in writing. Break-even uses only firm money. Add-ons, “other income” and auction or raffle estimates appear in the low, likely and high cases, labeled as your assumptions.</p>
+        <p>To share with the board, use <b>Copy board summary</b> (paste into an email) or <b>Print</b>.</p>
+      </section>
+      <div class="row-actions"><button class="btn" data-action="start-demo" data-demo="golf">Try a golf example</button><a class="btn ghost" href="#home">Back to home</a></div>
+    </article>`;
   }
 
   function viewWizard() {
@@ -725,12 +897,13 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <p class="lede-s">${state.options.length > 1 ? `Comparing ${state.options.length} options` : 'One option'}${Number(state.settings.fundraisingTarget) ? ` against a goal of ${money(state.settings.fundraisingTarget)} after costs` : ''}.</p>
         <div class="row-actions">
           <button class="btn" data-action="copy-memo">Copy board summary</button>
+          <button class="btn ghost" data-action="print">Print</button>
+          <button class="btn ghost dl-only" data-action="download-backup">Download backup file</button>
           <a class="btn ghost" href="#step-event">Edit answers</a>
-          <button class="btn ghost" id="exact-toggle" data-action="toggle-exact">${exact ? 'Show rounded figures' : 'Show exact figures'}</button>
         </div>
         <p id="live-status" class="sr-only" aria-live="polite">${esc(live)}</p>
       </header>
-      <section class="panel">${renderSummary(all)}</section>
+      <section class="panel" aria-label="Answers for each option">${renderSummary(all)}</section>
       ${state.options.length > 1 ? `<section class="panel"><h2>Side by side</h2>${renderComparison(all)}</section>` : ''}
       <section class="panel"><h2>Before anyone signs</h2><p class="hint">These can change the decision but can't be calculated. Get answers in writing.</p><ul class="plain miss">${SIGNING_QUESTIONS.map((q) => `<li>${esc(q)}</li>`).join('')}</ul>
         ${state.options.map((o) => `<details class="qs"><summary>Questions to ask the ${esc(T(o).venue)}: ${esc(o.name)}</summary><ul class="plain">${questionsFor(o).map((q) => `<li>${esc(q)}</li>`).join('')}</ul></details>`).join('')}</section>
@@ -742,8 +915,10 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     document.getElementById('demo-banner').hidden = !state.isDemo || view === 'home';
     document.querySelectorAll('[data-nav]').forEach((a) => a.classList.toggle('on', a.dataset.nav === view));
     document.getElementById('save-panel').hidden = !savePanel;
+    const bk = savePanel ? backupInfo() : null, bkEl = document.getElementById('backup-line');
+    if (bkEl) bkEl.innerHTML = bk ? `Backup in this browser: <b>${esc(bk.plan.eventName || 'Untitled plan')}</b>${bk.at ? ` (kept ${esc(new Date(bk.at).toLocaleString())})` : ''}. <button class="small" data-action="restore-backup">Restore previous plan</button>` : 'No backup in this browser yet. One is kept automatically whenever an example, a new plan or an imported file replaces your plan.';
     const app = document.getElementById('app');
-    app.innerHTML = view === 'wizard' ? viewWizard() : view === 'results' ? viewResults() : viewHome();
+    app.innerHTML = view === 'wizard' ? viewWizard() : view === 'results' ? viewResults() : view === 'guide' ? viewGuide() : viewHome();
     persist();
     const sl = app.querySelector('.steplist'), on = sl && sl.querySelector('li.on');
     if (sl && on && sl.scrollWidth > sl.clientWidth) sl.scrollLeft = on.offsetLeft - 16; // phones: show the current step pill
@@ -767,9 +942,9 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     if (t.dataset.action === 'import-json') return importJson(t.files[0]);
     if (!t.dataset.path) return;
     let v = t.value;
-    if (t.dataset.type === 'number') v = v === '' ? null : Math.max(0, Number(v));
+    if (t.dataset.type === 'number') { const n = Number(v); v = v === '' || !Number.isFinite(n) ? null : Math.max(0, n); }
     if (t.dataset.type === 'bool') v = t.checked;
-    if (t.dataset.type === 'pct') v = v === '' ? 0 : Math.min(100, Math.max(0, Number(v))) / 100;
+    if (t.dataset.type === 'pct') { const n = Number(v); v = v === '' || !Number.isFinite(n) ? 0 : Math.min(100, Math.max(0, n)) / 100; }
     const before = state.options.map((o) => E.evidenceStatus(state, o).state);
     setPath(state, t.dataset.path, v);
     afterEdit(t.dataset.path, before);
@@ -849,16 +1024,33 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     else if (a === 'copy-memo') return copyText(boardMemo(), b);
     else if (a === 'nav') return go(b.dataset.to);
     else if (a === 'opt-step') { openOption = i; render(true); window.scrollTo(0, 0); return; }
-    else if (a === 'start-demo') { if (hasSavedPlan() && !armed(b, 'This replaces your saved plan. Click again')) return; state = migrate(clone(b.dataset.demo === 'gala' ? window.BFDemo.DEMO_GALA : window.BFDemo.DEMO_STATE)); openOption = 0; touched = true; return go('step-event'); }
-    else if (a === 'toggle-save') { savePanel = !savePanel; }
-    else if (a === 'toggle-exact') { exact = !exact; }
+    else if (a === 'start-demo') { if (hasSavedPlan() && !armed(b, state.isDemo ? 'This replaces the example on screen. Click again' : 'This replaces your plan (a backup is kept). Click again')) return; if (!replacePlan(migrate(clone(b.dataset.demo === 'gala' ? window.BFDemo.DEMO_GALA : window.BFDemo.DEMO_STATE)), 'Example loaded. All of its numbers are made up.')) return; return go('step-event'); }
+    else if (a === 'toggle-save') { savePanel = !savePanel; render(); return; } // opening the panel is not an edit: don't save the example as a plan
     else if (a === 'csv-template') return showText('Survey summary CSV template', 'summary-template.csv', 'metric,option_id,value\nsurvey_responses,,0\n' + state.options.map((o) => ['paid_registrations', 'cash_received', 'named_high_intent', 'definitely_at_price', 'probably_at_price'].map((m) => `${m},${o.id},0`).join('\n')).join('\n') + '\n', 'text/csv');
-    else if (a === 'export') return showText('Your plan (JSON). Copy it and save it in a file, or use Download where it works.', 'fundraiser-plan.json', JSON.stringify(state, null, 2), 'application/json');
+    else if (a === 'export' || a === 'warn-export') return showText('Your plan (JSON). Copy it and save it in a file, or use Download where it works.', 'fundraiser-plan.json', JSON.stringify(state, null, 2), 'application/json');
     else if (a === 'copy-export') return copyText(document.getElementById('export-text').value, b);
     else if (a === 'download-export') { const t = document.getElementById('export-text'); return download(t.dataset.name, t.value, t.dataset.type); }
     else if (a === 'close-export') { document.getElementById('export-panel').hidden = true; return; }
-    else if (a === 'load-demo') { if (!armed(b, 'Replace your plan with the example? Click again')) return; state = migrate(clone(window.BFDemo.DEMO_STATE)); openOption = 0; savePanel = false; say('Golf example loaded. All of its numbers are made up.'); }
-    else if (a === 'start-blank') { if ((view !== 'home' || hasSavedPlan()) && !armed(b, 'This clears your current plan. Click again')) return; touched = true; state = migrate(clone(window.BFDemo.BLANK_STATE)); openOption = 0; savePanel = false; say('New plan started. It saves in this browser automatically.'); return go('step-event'); }
+    else if (a === 'load-demo') { if (!armed(b, 'Replace your plan with the example? A backup is kept. Click again')) return; if (!replacePlan(migrate(clone(window.BFDemo.DEMO_STATE)), 'Golf example loaded. All of its numbers are made up.')) return; savePanel = false; }
+    else if (a === 'start-blank') { if ((view !== 'home' || hasSavedPlan()) && !armed(b, 'This replaces your current plan (a backup is kept). Click again')) return; if (!replacePlan(migrate(clone(window.BFDemo.BLANK_STATE)), 'New plan started.', true)) return; savePanel = false; return go('step-event'); }
+    else if (a === 'restore-backup') {
+      const bk = backupInfo(); if (!bk) { say('There is no backup to restore.'); return; }
+      if (!armed(b, 'Swap your current plan with the backup? Click again')) return;
+      // A swap needs two writes. Change the plan on screen only if both work; otherwise put back what was there and say so.
+      const fail = 'Could not restore: this browser refused to store the change. Your current plan is still here. Use Download backup file to keep a copy.';
+      const backupRaw = storeRead(SAVE_KEY + '-backup'), primaryBefore = storeRead(SAVE_KEY), currentRaw = JSON.stringify(state);
+      if (!storeWrite(SAVE_KEY, backupRaw)) { say(fail); return; }
+      if (!storeWrite(SAVE_KEY + '-backup', currentRaw)) {
+        const undone = primaryBefore != null ? storeWrite(SAVE_KEY, primaryBefore) : (() => { try { localStorage.removeItem(SAVE_KEY); return true; } catch (e) { return false; } })();
+        if (!undone) setSaveProblem('Your current plan is not saved in this browser (a restore could not finish). Download a backup file now so you don\'t lose it.');
+        say(fail); return;
+      }
+      storeWrite(SAVE_KEY + '-backup-at', new Date().toISOString());
+      state = migrate(clone(bk.plan)); openOption = 0; touched = true; setSaveProblem('');
+      say('Previous plan restored. The plan you had open is now the backup, so you can swap back.');
+    }
+    else if (a === 'download-backup') { const day = new Date().toISOString().slice(0, 10); return download(`fundraiser-plan-${day}.json`, JSON.stringify(state, null, 2), 'application/json'); }
+    else if (a === 'print') { window.print(); return; }
     else return;
     touched = true;
     render();
@@ -932,18 +1124,24 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         const problems = validatePlan(s);
         if (problems.length) throw new Error(problems.slice(0, 3).join(' ') + (problems.length > 3 ? ` (${problems.length - 3} more)` : ''));
         const candidate = migrate(clone(s));
-        const prevState = state, prevSaved = (() => { try { return localStorage.getItem(SAVE_KEY); } catch (e) { return null; } })();
+        const prevState = state, prevSaved = storeRead(SAVE_KEY);
         try {
           state = candidate;
           // Dry run: every calculation and page the plan feeds must work before anything is replaced.
           candidate.options.forEach((o) => { analyse(o); });
           viewResults(); viewWizard(); boardMemo();
         } catch (err) { state = prevState; throw new Error('the plan has values the planner cannot use (' + err.message + ').'); }
-        let backedUp = false;
-        try { if (prevSaved) { localStorage.setItem(SAVE_KEY + '-backup', prevSaved); backedUp = true; } } catch (e) { /* ignore */ }
-        openOption = 0; touched = true;
-        try { render(); } catch (err) { state = prevState; try { if (prevSaved) localStorage.setItem(SAVE_KEY, prevSaved); } catch (e) { /* ignore */ } render(); throw err; }
-        say(backedUp ? 'Plan imported. Your previous plan was kept as a backup in this browser.' : 'Plan imported.');
+        state = prevState; // the backup is of the plan on screen, so put it back while the backup is made
+        const bk = secureBackup(); // same rule as the other replacements: no backup of a real plan, no replacement
+        if (bk === 'failed') {
+          savePanel = true; render();
+          say('Could not make a backup of your current plan (this browser refused to store it), so the file was not opened. Your plan is still here and unchanged. Use Download backup file to keep a copy before trying again.');
+          return;
+        }
+        const prevTouched = touched;
+        state = candidate; openOption = 0; touched = true;
+        try { render(); } catch (err) { state = prevState; touched = prevTouched; if (prevSaved != null) storeWrite(SAVE_KEY, prevSaved); render(); throw err; }
+        say('Plan imported.' + (bk === 'saved' ? ' Your previous plan was kept as a backup in this browser.' : '') + (saveProblem ? ' It is NOT saved in this browser yet: see the red warning.' : ''));
       } catch (err) { say('Could not import that file: ' + err.message); }
     });
   }
@@ -1001,8 +1199,15 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     const btn = document.querySelector('[data-action="copy-survey"]'); if (btn) btn.disabled = !snapshotReady();
   });
   document.addEventListener('click', onClick);
+  // Printing: open every collapsed detail section so the printout is complete, then put them back.
+  let printOpened = [];
+  // Add to the list rather than replace it: if a second beforeprint arrives first, the first one's sections still close.
+  window.addEventListener('beforeprint', () => { const closed = [...document.querySelectorAll('#app details:not([open])')]; closed.forEach((el) => { el.open = true; }); printOpened = printOpened.concat(closed); });
+  window.addEventListener('afterprint', () => { printOpened.forEach((el) => { el.open = false; }); printOpened = []; });
   document.addEventListener('pointermove', onMove);
-  window.addEventListener('hashchange', () => { readHash(); render(true); window.scrollTo(0, 0); });
+  // Moving to another page clears an old status message (but not one set by the click that caused the move).
+  window.addEventListener('hashchange', () => { if (Date.now() - saidAt > 1500) say(''); readHash(); render(true); window.scrollTo(0, 0); });
+  loadSavedPlan();
   readHash();
   render();
   if (startupNote) say(startupNote);

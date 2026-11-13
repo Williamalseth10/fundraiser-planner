@@ -6,9 +6,6 @@
 <title>Booster Fundraiser Planner</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <meta name="description" content="Decide whether a fundraiser is worth it before you sign: real quotes, real supporter answers, plain-number results.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&display=swap">
 <style>
 /* Layout: sticky site header, single centered column; wizard = step list + one question card; results = verdict cards first, detail last. */
 :root {
@@ -19,8 +16,8 @@
   --neg: #b42318; --ok: #146c2e; --ok-bg: #e3f3e7; --warn: #8a5a00; --warn-bg: #fcefd2;
   --bad: #b42318; --bad-bg: #fde7e4; --unk: #6b4e00; --unk-bg: #fff2c6;
   --demo-bg: #fff2c6; --demo-border: #d9ad1c;
-  --font-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
-  --font-body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --radius: 12px;
 }
@@ -49,8 +46,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.55 var
 body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
 a { color: var(--accent); }
 h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; line-height: 1.15; margin: 0; }
-h1 { font-size: clamp(30px, 5.2vw, 50px); font-weight: 800; letter-spacing: -0.02em; }
-h2 { font-size: clamp(22px, 3vw, 28px); font-weight: 800; letter-spacing: -0.01em; }
+h1 { font-size: clamp(28px, 4.6vw, 44px); font-weight: 800; letter-spacing: -0.015em; }
+h2 { font-size: clamp(21px, 2.8vw, 26px); font-weight: 750; letter-spacing: -0.005em; }
 h3 { font-size: 19px; font-weight: 600; }
 h3.sub { margin: 22px 0 8px; } h4 { font-size: 15px; margin: 18px 0 6px; }
 .gutter { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
@@ -72,6 +69,9 @@ h3.sub { margin: 22px 0 8px; } h4 { font-size: 15px; margin: 18px 0 6px; }
 .site nav a:hover, .site nav button:hover { background: var(--surface-2); color: var(--text); }
 .site nav a.on { color: var(--accent); background: var(--accent-soft); font-weight: 700; }
 
+.save-warning { background: var(--bad-bg); color: var(--text); border-bottom: 2px solid var(--bad); padding-block: 10px; font-size: 16px; }
+.save-warning b { color: var(--bad); margin-right: 4px; }
+.save-warning-actions { display: inline-flex; flex-wrap: wrap; gap: 8px; margin-left: 6px; vertical-align: middle; }
 .demo { background: var(--demo-bg); border-bottom: 1px solid var(--demo-border); font-size: 15px; padding-block: 8px; }
 .demo b { margin-right: 6px; }
 .status { background: var(--accent-soft); border-radius: 8px; padding: 10px 14px; margin: 14px 0 0; font-size: 15px; }
@@ -184,11 +184,10 @@ code { font-family: var(--font-mono); font-size: 13px; }
 .st-ok { color: var(--ok); background: var(--ok-bg); } .st-warn { color: var(--warn); background: var(--warn-bg); }
 .st-bad { color: var(--bad); background: var(--bad-bg); } .st-unknown { color: var(--unk); background: var(--unk-bg); }
 .sum + .sum { border-top: 1px solid var(--border); margin-top: 26px; padding-top: 22px; }
-.sum h4 { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; font-family: var(--font-display); font-size: 22px; margin: 0 0 14px; }
 .aloud { background: var(--accent-soft); border-left: 4px solid var(--accent); border-radius: 8px; padding: 12px 14px; margin: 0 0 14px; font-size: 16px; }
-.cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 6px 0 14px; }
-@media (max-width: 760px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 420px) { .cards { grid-template-columns: minmax(0, 1fr); } }
+.cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 6px 0 14px; }
+@media (max-width: 980px) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 480px) { .cards { grid-template-columns: minmax(0, 1fr); } }
 .card { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--surface-2); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .card span { font-size: 14px; color: var(--text-2); font-weight: 700; }
 .card b { font-family: var(--font-display); font-size: 24px; font-variant-numeric: tabular-nums; }
@@ -212,12 +211,46 @@ figure.chart svg { width: 100%; height: auto; display: block; overflow: visible;
 pre.survey { white-space: pre-wrap; background: var(--surface-2); padding: 14px; border-radius: 8px; font: 14px/1.5 var(--font-mono); max-height: 460px; overflow: auto; }
 #save-panel .panel { margin: 14px 0 0; }
 #export-text { font: 13px/1.4 var(--font-mono); min-height: 160px; }
+/* field help, results answers, guide */
+.help { display: block; font-size: 14px; font-weight: 400; color: var(--text-2); line-height: 1.4; }
+.chk > span { display: flex; flex-direction: column; }
+.chk .help { margin-top: 2px; }
+.storage-note { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; font-size: 15px; color: var(--text-2); max-width: 64ch; }
+.sum-title { font-size: 22px; margin: 0 0 8px; }
+.status-line { margin: 0 0 6px; }
+.meaning { color: var(--text-2); margin: 0 0 14px; max-width: 72ch; }
+.card b { font-size: 22px; overflow-wrap: anywhere; }
+.card em { font-size: 14px; color: var(--text-2); line-height: 1.4; }
+.sum-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 8px 28px; }
+@media (max-width: 760px) { .sum-grid { grid-template-columns: minmax(0, 1fr); } }
+.sum-grid h4, .verify h4 { font-size: 16px; margin: 14px 0 4px; }
+.verify { border-top: 1px solid var(--border); margin-top: 10px; }
+ul.standing { list-style: none; padding: 0; margin: 6px 0; display: grid; gap: 4px; font-size: 15px; }
+ul.standing li { display: flex; gap: 8px; align-items: baseline; }
+ul.standing li > span:first-child { flex: none; width: 1.3em; text-align: center; font-weight: 700; }
+ul.standing li.yes > span:first-child { color: var(--ok); }
+ul.standing li.no { color: var(--text-2); }
+.guide { max-width: 820px; }
+.guide h1 { margin-bottom: 8px; }
+.guide .panel h2 { font-size: 21px; }
+ol.steps { padding-left: 22px; } ol.steps li { margin: 6px 0; }
+dl.statuses { display: grid; gap: 10px; margin: 8px 0 16px; }
+dl.statuses dd { margin: 4px 0 0; color: var(--text-2); }
 footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); font-size: 14px; padding-block: 22px 32px; }
-@media (max-width: 640px) { body { font-size: 16px; } .site nav a, .site nav button { padding: 8px 9px; font-size: 14px; } }
+@media (max-width: 640px) { body { font-size: 16px; } .site { position: static; } .site nav a, .site nav button { padding: 8px 9px; font-size: 14px; } }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }
 @media print {
-  .site, .steplist, .stepnav, .row-actions, button, #save-panel, .demo { display: none !important; }
-  body { background: #fff; color: #000; } .panel { border: 0; padding: 0; }
+  :root { --bg: #fff; --surface: #fff; --surface-2: #f3f3f3; --text: #000; --text-2: #222; --muted: #333; --border: #bbb; }
+  .site, .steplist, .stepnav, .row-actions, button, #save-panel, #status, .tip, .storage-note { display: none !important; }
+  body { background: #fff; color: #000; font-size: 12pt; } main { padding: 0; }
+  .demo { border: 1px solid #000; }
+  .panel { border: 0; padding: 0; margin-bottom: 12pt; }
+  .card, .aloud, tr, ul.standing li, .verify li { break-inside: avoid; }
+  .sum + .sum { break-before: page; border: 0; }
+  .table-wrap { overflow: visible; }
+  table.res th:first-child, table.res td:first-child { position: static; }
+  details > summary { list-style: none; }
+  a { color: #000; text-decoration: none; }
 }
 </style>
 </head>
@@ -232,25 +265,36 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
       <a href="#home" data-nav="home">Home</a>
       <a href="#step-event" data-nav="wizard">Plan</a>
       <a href="#results" data-nav="results">Results</a>
-      <button data-action="toggle-save" aria-controls="save-panel">Save / load</button>
+      <a href="#guide" data-nav="guide">How to use</a>
+      <button data-action="toggle-save" aria-controls="save-panel">Save &amp; backup</button>
     </nav>
   </div>
 </header>
+<div id="save-warning" class="save-warning gutter" role="alert" hidden><div class="wrap"><b>Not saved.</b> <span data-role="text"></span>
+  <span class="save-warning-actions"><button class="small dl-only" data-action="download-backup">Download backup file</button> <button class="small" data-action="warn-export">Show plan as text</button></span></div></div>
 <div id="demo-banner" class="demo gutter" role="note" hidden><div class="wrap"><b>Example data.</b>Every quote, cost, survey answer and sponsor in this example is made up. Start a new plan to enter your own.</div></div>
 <div class="gutter"><div class="wrap">
   <div id="save-panel" hidden>
     <section class="panel">
-      <h2>Save or load a plan</h2>
-      <p class="hint">Your plan saves automatically in this browser. To keep a copy, move it to another computer, or share it with your board, export it and save the text in a file.</p>
+      <h2>Save &amp; backup</h2>
+      <p>Your plan saves by itself, but <b>only in this browser on this device</b>. If saving ever fails, a red “Not saved” warning appears at the top until it works again. It is not stored online, it does not sync to other devices, and clearing your browser data can erase it. Download a backup file to keep a copy you control.</p>
       <div class="row-actions">
-        <button class="small" data-action="export">Export plan</button>
-        <label class="small">Import a plan file<input type="file" class="file-input" accept=".json,application/json" data-action="import-json"></label>
-        <button class="small" data-action="load-demo">Load the golf example</button>
-        <button class="small danger" data-action="start-blank">Start over</button>
+        <button class="btn dl-only" data-action="download-backup">Download backup file</button>
+        <button class="small" data-action="export">Show plan as text</button>
+        <label class="small">Open a backup file<input type="file" class="file-input" accept=".json,application/json" data-action="import-json"></label>
       </div>
+      <p class="hint">Opening a file replaces the plan on screen. The file is checked first; if anything is wrong, nothing changes. Your current plan is kept as a backup.</p>
+      <p class="hint" id="backup-line"></p>
+      <h3 class="sub">Start again</h3>
+      <div class="row-actions">
+        <button class="small" data-action="load-demo">Load the golf example</button>
+        <button class="small danger" data-action="start-blank">Start over with a blank plan</button>
+      </div>
+      <p class="hint">Both ask you to click twice, and both keep your current plan as a backup first.</p>
       <div id="export-panel" hidden>
         <h3 id="export-title" class="sub">Export</h3>
         <textarea id="export-text" rows="10" aria-labelledby="export-title" readonly></textarea>
+        <p class="hint">To save it without the Download button, copy this text into a plain-text file named something like <code>fundraiser-plan.json</code>.</p>
         <div class="row-actions"><button class="small" data-action="copy-export">Copy</button><button class="small dl-only" data-action="download-export">Download</button><button class="small" data-action="close-export">Close</button></div>
       </div>
     </section>

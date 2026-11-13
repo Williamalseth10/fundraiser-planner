@@ -1,6 +1,6 @@
 # Browser smoke test for the built site. Usage: python3 test/ui_smoke.py [screenshot_dir]
 import sys, pathlib
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 page_path = pathlib.Path(__file__).resolve().parent.parent / 'dist' / 'booster-fundraiser-planner.html'
 URL = page_path.as_uri()
@@ -18,6 +18,13 @@ def no_hscroll(pg, where):
 def shot(pg, name):
     if shots: pg.screenshot(path=f'{shots}/{name}.png', full_page=True)
 
+def banner_within(pg, state, message, timeout=3000):
+    # Explicit wait for the example banner to become 'visible' or 'hidden'; fails with `message` if it doesn't in time.
+    try:
+        pg.wait_for_selector('#demo-banner', state=state, timeout=timeout)
+    except PlaywrightTimeout:
+        raise AssertionError(f'{message} (still not {state} after {timeout} ms)')
+
 PER_OPTION = {'quote', 'prices', 'costs', 'scenarios'}
 STEP_IDS = ['event', 'options', 'quote', 'prices', 'costs', 'sponsors', 'survey', 'evidence', 'scenarios', 'volunteers']
 
@@ -31,7 +38,9 @@ with sync_playwright() as p:
         assert not pg.is_visible('#demo-banner'), 'no example banner on the home page'
         pg.click('text=Try a golf example')
         pg.wait_for_function("location.hash === '#step-event'", timeout=3000)
-        assert pg.is_visible('#demo-banner'), 'example banner must show in the planner'
+        # The page redraws (and shows the banner) just after the address changes, so wait for it rather than
+        # checking instantly. Still fails if the banner hasn't appeared within 3 seconds.
+        banner_within(pg, 'visible', 'example banner must show in the planner')
         for k, sid in enumerate(STEP_IDS):
             pg.wait_for_function(f"location.hash === '#step-{sid}'", timeout=3000)
             pg.wait_for_timeout(50)
@@ -151,7 +160,7 @@ with sync_playwright() as p:
     # start over needs a second click, then shows a blank plan
     pg.click('#save-panel [data-action="start-blank"]'); pg.click('#save-panel [data-action="start-blank"]')
     pg.wait_for_function("location.hash === '#step-event'", timeout=3000)
-    assert not pg.is_visible('#demo-banner')
+    banner_within(pg, 'hidden', 'example banner must disappear for a blank plan')
     b.close()
 
 if errors:

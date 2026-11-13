@@ -162,7 +162,7 @@ test('non-monotonic: if net drops below zero at a higher headcount, the result i
   const d = E.decide(s, o);
   assert.equal(d.breakEven.nonMonotonic, true);
   assert.notEqual(d.status, 'supported_by_current_evidence');
-  assert.ok(d.reasons.some((r) => /drops below zero/i.test(r)));
+  assert.ok(d.reasons.some((r) => /falls below zero again/i.test(r))); // wording updated 2026-11 (DECISION_LOG row 62); rule unchanged
 });
 
 // ---- readiness: numbers clearing the threshold is not the same as ready to sign ----

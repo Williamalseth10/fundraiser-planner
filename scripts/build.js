@@ -16,7 +16,8 @@ console.log('built dist/booster-fundraiser-planner.html', html.length, 'bytes');
 // Hosted-page variant: the host supplies the doctype/html/head/body skeleton, so keep only <title>, <meta>, <style> and body content.
 const head = html.match(/<head>([\s\S]*?)<\/head>/)[1].replace(/<meta charset[^>]*>\s*/, '').replace(/<meta name="viewport"[^>]*>\s*/, '');
 const body = html.match(/<body>([\s\S]*?)<\/body>/)[1];
-// Hosted viewers can't receive file downloads, so the Download button is hidden there (Copy still works).
-const hostedBody = body.replace('<button class="small dl-only" data-action="download-export">Download</button>', '');
-fs.writeFileSync(path.join(root, 'dist/hosted.html'), head.trim() + '\n' + hostedBody.trim() + '\n');
+// Hosted viewers can't receive file downloads, so every download button (class "dl-only") is hidden there.
+// "Show plan as text" and Copy still work for keeping a backup.
+const hostedHead = head.trim() + '\n<style>.dl-only { display: none !important; }</style>';
+fs.writeFileSync(path.join(root, 'dist/hosted.html'), hostedHead + '\n' + body.trim() + '\n');
 console.log('built dist/hosted.html');
