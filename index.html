@@ -1236,10 +1236,19 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
       <button class="small" data-action="add-option">+ Add another option</button>`;
   }
 
+  function hasProductGrouping(o) {
+    return o.kind === 'product' && (Number(o.groupSize) > 1 || Number(o.groupShare) > 0);
+  }
+  function useIndividualItems(o) {
+    o.groupSize = 1; o.wholeGroupsOnly = false; o.groupPrice = null; o.groupShare = 0;
+    o.quoteVerified = false;
+  }
+
   function stepQuote() {
     const i = cur(), p = `options.${i}`, o = state.options[i], t = T(o);
     const product = t.survey === 'buy';
     return `${optionTabs('Fill this in for each option.')}
+      ${hasProductGrouping(o) ? `<div class="warn-callout"><b>Check inherited group settings.</b> This product option still uses groups of ${esc(o.groupSize)} in its saved settings. That can round item counts down or apply group pricing. If you sell individual items, use the button below, then confirm the supplier quote again. <button class="small" data-action="individual-items" data-i="${i}">Use individual-item sales</button></div>` : ''}
       ${product ? '<p class="hint">If sellers collect orders and money <b>before</b> you order from the supplier, the items you must pay for is usually 0 (unless the supplier has a minimum). If you must buy stock up front, enter that quantity: you pay for it whether it sells or not.</p>' : ''}
       <div class="fields">
         ${num(p + '.venueQuote.perParticipant', product ? 'Supplier cost per item ($)' : `${cap(t.venue)} charge per ${t.one} ($)`, { help: product ? 'What you pay the supplier for each item, including tax and shipping. This is your cost, not your selling price.' : 'From the written quote. Include sales tax and any service charge or gratuity.' })}
@@ -1650,6 +1659,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <h3 id="sum-${i}" class="sum-title">${esc(o.name)}</h3>
         <p class="status-line"><span class="badge ${statusClass(d.status)}"><i aria-hidden="true">${statusIcon(d.status)}</i>${esc(E.STATUS_LABELS[d.status])}</span></p>
         <p class="meaning">${esc(STATUS_MEANING[d.status])}</p>
+        ${hasProductGrouping(o) ? `<p class="warn-callout">This product option uses group settings that can change item counts or pricing. <a href="#step-quote">Review the supplier step</a> before relying on these results.</p>` : ''}
         <div class="cards">
           <div class="card ${gapOpen ? 'bad' : ''}"><span>${t.survey === 'buy' ? 'Cash needed up front' : 'Cash needed before event day'}</span><b>${hm(x.cashNeededBeforeEvent)}</b><em>Deposit and bills due in advance. You have ${hm(x.cashInHand)} in hand${x.shortBeforeEvent > 0 ? `, so you are short ${hm(x.shortBeforeEvent)}${o.upfrontFundingConfirmed ? ' (the club confirmed it can cover this)' : ' (not yet covered)'}` : ''}.${d.firm.upfront.registrationCashUnknown ? ' Money received from people who paid is not entered yet.' : ''}</em></div>
           <div class="card ${x.largestLoss > 0 || moreLoss ? 'bad' : ''}"><span>Loss if ${nobody} or you cancel</span><b>${hm(x.largestLoss)}${x.cancellationKnown ? '' : ' or more'}</b><em>If ${nobody}: ${hm(x.lossIfNobodyComes)}. If you cancel after the deadline: ${x.cancellationKnown ? hm(x.lossIfCanceled) : 'not entered yet'}. ${moreLoss ? `<strong>Holding it can lose more:</strong> at ${x.worstOnChart.participants} ${esc(t.many)}, firm money comes out at ${hm(x.worstOnChart.net)} (see the chart).` : 'Other turnouts can lose more; check the chart.'} Uses only the terms you entered.</em></div>
@@ -1752,7 +1762,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       <section class="how">
         <div><span class="num">1</span><h3>Enter your real quotes</h3><p>Venue or supplier prices, minimums, deposits, prizes. The planner works out what you owe even if turnout or sales are low.</p></div>
         <div><span class="num">2</span><h3>Ask your supporters</h3><p>Get a ready-to-send survey with your exact prices. Enter the totals when answers come back.</p></div>
-        <div><span class="num">3</span><h3>Get a clear answer</h3><p>See break-even, cash needed up front and worst case, plus a summary you can read to the board.</p></div>
+        <div><span class="num">3</span><h3>Get a clear answer</h3><p>See break-even, cash needed up front and loss scenarios, plus a summary you can read to the board.</p></div>
       </section>
       <section class="honest">
         <h2>What it won't do</h2>
@@ -1806,6 +1816,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       <section class="panel"><h2>4. Save and keep a backup</h2>
         <ul class="plain">
           <li>Your plan saves by itself, but <b>only in this browser on this device</b>. It isn't stored online and won't appear on another computer or phone.</li>
+          <li>The website and downloaded HTML file keep separate saved plans. To move between them, use <b>Download backup file</b>, then <b>Open a backup file</b> in the other copy.</li>
           <li>Clearing your browser history or site data, or using a private window, can erase it.</li>
           <li>To keep a copy, open <b>Save &amp; backup</b> and choose <b>Download backup file</b>. Keep the file somewhere safe, such as your documents folder or email it to yourself.</li>
           <li>To open the plan later or on another computer, open <b>Save &amp; backup</b>, choose <b>Open a backup file</b> and pick that file.</li>
@@ -1960,6 +1971,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     if (!b || b.tagName === 'INPUT') return;
     const a = b.dataset.action, i = +b.dataset.i, j = +b.dataset.j;
     if (a === 'tab') openOption = i;
+    else if (a === 'individual-items') { const before = state.options.map((o) => E.evidenceStatus(state, o).state); useIndividualItems(state.options[i]); afterEdit(`options.${i}.groupSize`, before); }
     else if (a === 'add-row') { state.options[i][b.dataset.key].push({ id: uid('cost_'), label: 'New cost', amount: 0, paidUpfront: false }); state.options[i].costsVerified = false; }
     else if (a === 'del-row') { state.options[i][b.dataset.key].splice(j, 1); state.options[i].costsVerified = false; }
     else if (a === 'confirm-terms') { if (!armed(b, 'Only if you asked supporters about this exact offer. Click again')) return; state.evidence.offerTerms = state.evidence.offerTerms || {}; state.evidence.offerTerms[state.options[i].id] = E.offerTerms(state.options[i], state.snapshot); say('Recorded: these answers are for the current offer.'); }

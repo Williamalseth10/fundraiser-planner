@@ -61,5 +61,9 @@ CI (`.github/workflows/ci.yml`) runs the engine tests, the build and an `index.h
 - A saved plan that fails the check at startup is kept aside (`bfp-plan-v1-unreadable`). If that copy can't be made, the app won't write over it and says changes aren't being saved.
 - Everything displayed is escaped. Imported text can't run as code (covered by `ui_review.py`).
 
-## Publishing (needs William's approval; nothing is published today)
-GitHub Pages is free: Settings → Pages → "Deploy from a branch" → `main` / root. The site would appear at `https://williamalseth10.github.io/fundraiser-planner/`. This makes the **planner page public**; people's plans still stay in their own browsers. The repository is already public. To roll back, set Pages "Source" back to "None", or revert the commit on `main`.
+## Published website and future changes
+The [live planner](https://williamalseth10.github.io/fundraiser-planner/) is published through GitHub Pages from `main` / root. On November 13, 2026, main was `450b3a5e5e124f3944e09963f2ffe54c35c013cc`; the successful deployment and served HTML were verified. Publication is complete; do not repeat setup.
+
+New production changes still require William's approval. Local review changes are not live. After approval, rollback means reverting the specific approved batch on main, preserving saved-plan keys and schema. Do not disable hosting as a routine rollback.
+
+The website and downloaded HTML file keep separate saved plans. Transfer using Download backup file and Open a backup file. Local HTML opens offline; the hosted page still needs initial first-party delivery.

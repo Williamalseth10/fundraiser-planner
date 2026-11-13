@@ -69,5 +69,5 @@ Sponsorship { id, label, amount, status: collected|committed|hoped, type: cash|i
 
 ## Next steps (proposed)
 1. One real session: the organizer enters a real quote with someone watching (see `PILOT_KIT.md`), and you record what was confusing.
-2. Publish only with William's approval (see `README.md`, "Publishing").
+2. Publication is complete. Obtain William's approval for any new production batch (see `README.md`).
 3. Revisit cancellation dates (what is owed at each date) once a real contract shows that structure.
