@@ -44,10 +44,14 @@ EventOption {
   deposit: { amount, creditedTowardBill, refundable },
   perParticipantCosts: [{id,label,amount}], fixedCosts: [{id,label,amount,paidUpfront}],
   volunteerHours, quoteVerified, costsVerified, upfrontFundingConfirmed,
-  scenarioParticipants: { conservative, middle, optimistic }
+  scenarioParticipants: { conservative, middle, optimistic },
+  contract?: { quoteDate, quoteExpires, depositDue, headcountDue, cancelBy: 'YYYY-MM-DD'|''|null,
+               quoteSource, cancellationNotes, weatherNotes: short text }   (optional, row 78; never used in the math)
 }
 Sponsorship { id, label, amount, status: collected|committed|hoped, type: cash|inKind, replacesCostId?, optionId? }
 ```
+
+**Schema note (row 78):** `contract` is optional and additive, so `schemaVersion` stays 1 and older plans and files load unchanged. Dates are calendar text (`YYYY-MM-DD`), compared as calendar days against the local date. A file with an impossible date or non-text notes is refused whole and changes nothing. The "What would need to change?" boxes and the save-time line are screen-only: they are never written to the plan or to storage.
 
 ## Core rules (all covered by tests)
 - **Feasible headcounts:** 0 up to capacity, in whole groups when required. Never rounded up. Counts below the number already paid aren't scanned.
@@ -66,6 +70,9 @@ Sponsorship { id, label, amount, status: collected|committed|hoped, type: cash|i
   6. The conservative scenario loses money → **High financial risk**.
   7. Firm money loses money at the low number (only assumptions make it positive) → **High financial risk**.
   8. Otherwise: **Numbers hold up so far, but open items remain** if anything is on the must-verify list, else **Supported by current evidence (not a guarantee)**.
+
+- **What would need to change** (`whatWouldChange`, row 77): at one chosen number, firm money, the extra firm sponsorship for break-even and for the goal (exact, because sponsorship is the same at every number), and a headcount answer only when a higher feasible number raises firm money. Typed-in prices are compared at the same number; no price is solved for. `compareOptions` puts every option at its own likely number on firm money.
+- **Contract checklist** (`contractChecklist`, row 78): pure, with today's date passed in. It reports each date as unknown, upcoming, today or passed, and keeps the amount owed separate from the deadline.
 
 ## Next steps (proposed)
 1. One real session: the organizer enters a real quote with someone watching (see `PILOT_KIT.md`), and you record what was confusing.

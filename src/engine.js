@@ -11,6 +11,7 @@
   'use strict';
 
   const SPONSOR_STATUSES = ['collected', 'committed', 'hoped'];
+  const SCENARIO_KEYS = ['conservative', 'middle', 'optimistic'];
 
   const c = (dollars) => Math.round((Number(dollars) || 0) * 100); // to cents
   // Money the organizer enters (prices, quotes, costs, sponsorship, assumptions). A negative or non-numeric
@@ -472,6 +473,160 @@
     };
   }
 
+  /**
+   * "What would need to change?" for one option at ONE headcount the organizer picks.
+   * Everything is on the firm-money basis (firmContext: ticket money, collected + committed sponsorship, the conservative
+   * cost cushion; no add-ons, other income or auction estimates), so it lines up with break-even and the chart.
+   * Nothing here changes the plan. Every answer is a hypothetical with its assumptions stated:
+   *  - sponsorship gaps are exact, because firm sponsorship adds the same amount at every headcount;
+   *  - headcount answers are offered only when a higher feasible count actually raises firm net (never when each extra
+   *    person or item makes the result worse);
+   *  - price comparisons use prices the organizer types in and keep the SAME headcount: they say nothing about whether
+   *    that many people would still come at the other price. Tickets already paid keep the money actually received.
+   * req: { participants, scenario?, prices: [{ price, groupPrice }] } (a blank groupPrice means group size x price, no discount)
+   * With `scenario` ('conservative' | 'middle' | 'optimistic') the answer uses that scenario's cost cushion and only the
+   * FIRM part of the sponsorship it counts (so "conservative, collected only" stays collected only, and hoped-for money is
+   * never counted). Without it, the firm-money basis of break-even is used.
+   */
+  function whatWouldChange(state, option, req = {}) {
+    let firmCtx = firmContext(state, option);
+    if (SCENARIO_KEYS.includes(req.scenario)) {
+      const sc = scenarioContext(state, option, req.scenario);
+      firmCtx = { ...sc, statuses: sc.statuses.filter((s) => s === 'collected' || s === 'committed'), extraRevenuePerParticipant: 0, otherRevenue: 0 };
+    }
+    const target = nonNeg((state.settings || {}).fundraisingTarget);
+    const goalC = c(target);
+    const at = project(option, req.participants, firmCtx);
+    const n = at.participants;
+    const netC = c(at.net);
+    const curve = netCurve(option, firmCtx);
+    const best = curve.reduce((hi, p) => (p.net > hi.net ? p : hi), curve[0] || { participants: 0, net: at.net });
+    const above = curve.filter((p) => p.participants > n);
+    const bestAbove = above.reduce((hi, p) => (!hi || p.net > hi.net ? p : hi), null);
+    const step = participantStep(option);
+    const next = n + step <= maxFeasible(option) ? project(option, n + step, firmCtx) : null;
+    const reachAbove = (goal) => { const p = above.find((q) => c(q.net) >= goal); return p ? p.participants : null; };
+    const moreHelps = !!bestAbove && c(bestAbove.net) > netC;
+    const tg = participantsNeeded(option, target, firmCtx);
+    const be = participantsNeeded(option, 0, firmCtx);
+    const sp = sponsorshipCashCents(option, firmCtx.sponsorships, firmCtx.statuses);
+    const perUnitCost = ci((option.venueQuote || {}).perParticipant) + (option.perParticipantCosts || []).reduce((s, l) => s + ci(l.amount), 0);
+    const size = Math.max(1, int(option.groupSize) || 1);
+    const gpNow = option.groupPrice !== undefined ? option.groupPrice : option.foursomePrice;
+    const priceFor = (alt) => {
+      const r = project(alt, n, firmCtx), rc = c(r.net);
+      const beA = participantsNeeded(alt, 0, firmCtx), tgA = participantsNeeded(alt, target, firmCtx);
+      const gp = size > 1 ? (alt.groupPrice == null || alt.groupPrice === '' ? ci(alt.price) * size : ci(alt.groupPrice)) : null;
+      // Lowest money one more person or item could bring in (a group discount lowers it) against what each one costs.
+      const lowestPerUnit = gp != null && nonNeg(alt.groupShare) > 0 ? Math.min(ci(alt.price), Math.floor(gp / size)) : ci(alt.price);
+      return {
+        price: d(ci(alt.price)), groupPrice: gp == null ? null : d(gp), groupPriceDefaulted: size > 1 && (alt.groupPrice == null || alt.groupPrice === ''),
+        participants: r.participants, net: d(rc), changeFromCurrent: d(rc - netC),
+        sponsorshipToBreakEven: d(Math.max(0, -rc)), sponsorshipToGoal: target > 0 ? d(Math.max(0, goalC - rc)) : null,
+        breakEven: beA.reachableWithinCapacity ? beA.participants : null, breakEvenDipsAt: beA.dipsAt,
+        goalParticipants: target > 0 && tgA.reachableWithinCapacity ? tgA.participants : null,
+        losesPerExtra: lowestPerUnit < perUnitCost,
+      };
+    };
+    const prices = (req.prices || []).filter((p) => p && p.price !== '' && p.price != null && Number.isFinite(Number(p.price)) && Number(p.price) >= 0)
+      .map((p) => priceFor({ ...option, price: Number(p.price), groupPrice: p.groupPrice === '' || p.groupPrice == null ? null : nonNeg(p.groupPrice), foursomePrice: undefined }));
+    return {
+      basis: {
+        requested: at.requested, participants: n, flags: at.flags, maxFeasible: maxFeasible(option), step,
+        scenario: SCENARIO_KEYS.includes(req.scenario) ? req.scenario : null,
+        statuses: firmCtx.statuses.slice(), firmSponsorship: d(sp.counted), hopedSponsorship: d(sp.byStatus.hoped),
+        leftOut: d(Object.entries(sp.byStatus).filter(([k]) => !firmCtx.statuses.includes(k)).reduce((s, [, v]) => s + v, 0)),
+        leftOutByStatus: Object.fromEntries(Object.entries(sp.byStatus).filter(([k, v]) => !firmCtx.statuses.includes(k) && v > 0).map(([k, v]) => [k, d(v)])),
+        minimumParticipants: int((option.venueQuote || {}).minimumParticipants),
+        costCushionPct: nonNeg(firmCtx.costContingencyPct), paid: int(firmCtx.paidRegistrations),
+        paidCash: firmCtx.paidRegistrationCash == null || firmCtx.paidRegistrationCash === '' ? null : d(ci(firmCtx.paidRegistrationCash)),
+        price: d(ci(option.price)), groupPrice: size > 1 ? (gpNow == null || gpNow === '' ? d(ci(option.price) * size) : d(ci(gpNow))) : null, groupSize: size,
+      },
+      net: d(netC), revenue: at.revenue.total, expenses: at.expenses.total, venueMinimumApplied: at.expenses.venueMinimumApplied,
+      target,
+      sponsorship: { toBreakEven: d(Math.max(0, -netC)), toGoal: target > 0 ? d(Math.max(0, goalC - netC)) : null },
+      headcount: {
+        moreHelps, nextParticipants: next ? next.participants : null, nextChange: next ? d(c(next.net) - netC) : null,
+        toBreakEven: netC >= 0 ? null : reachAbove(0), toGoal: target > 0 && netC < goalC ? reachAbove(goalC) : null,
+        breakEvenBelow: netC < 0 && be.reachableWithinCapacity && be.participants < n ? be.participants : null,
+      },
+      goal: {
+        reachableWithinCapacity: tg.reachableWithinCapacity, participants: tg.participants,
+        bestOnChart: { participants: best.participants, net: best.net },
+        sponsorshipAtBest: target > 0 ? d(Math.max(0, goalC - c(best.net))) : null,
+      },
+      breakEvenReachable: be.reachableWithinCapacity,
+      prices,
+    };
+  }
+
+  /**
+   * The same three questions for every option, side by side, each at its OWN likely (middle) number on the firm-money
+   * basis: does firm money reach the goal there, how much cash is needed first, the two-case loss and the chart's low
+   * point, and volunteer hours. A comparison, not a recommendation.
+   */
+  function compareOptions(state) {
+    const target = nonNeg((state.settings || {}).fundraisingTarget);
+    return (state.options || []).map((o) => {
+      const dec = decide(state, o);
+      const likely = project(o, (o.scenarioParticipants || {}).middle, firmContext(state, o));
+      return {
+        id: o.id, name: o.name, status: dec.status, likelyParticipants: likely.participants, firmNetLikely: likely.net,
+        meetsGoalAtLikely: target > 0 ? c(likely.net) >= c(target) : null, goalReachableWithinCapacity: dec.targetNeeded.reachableWithinCapacity,
+        cashNeededBeforeEvent: dec.exposure.cashNeededBeforeEvent, largestLoss: dec.exposure.largestLoss, cancellationKnown: dec.exposure.cancellationKnown,
+        worstOnChartLoss: dec.exposure.worstOnChartLoss, volunteerHours: nonNeg(o.volunteerHours),
+      };
+    });
+  }
+
+  // ---------- contract dates (calendar dates only; they never change the money) ----------
+  // Dates are stored as the YYYY-MM-DD text a date box gives, and compared as calendar days. Never through
+  // Date.toISOString(), which is UTC and can move a date by a day in the evening (US) or morning (Asia/Pacific).
+  const CONTRACT_DATES = [
+    ['quoteExpires', 'Quote expires'],
+    ['depositDue', 'Deposit due'],
+    ['headcountDue', 'Final guaranteed headcount due'],
+    ['cancelBy', 'Last day to cancel under the quote’s terms'],
+  ];
+  const CONTRACT_TEXT = ['quoteSource', 'cancellationNotes', 'weatherNotes'];
+  function isCalendarDate(s) {
+    if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+    const [y, m, dd] = s.split('-').map(Number);
+    if (y < 1900 || y > 2200 || m < 1 || m > 12 || dd < 1) return false;
+    return dd <= new Date(Date.UTC(y, m, 0)).getUTCDate();
+  }
+  function daysBetween(fromYMD, toYMD) {
+    const u = (s) => { const [y, m, dd] = s.split('-').map(Number); return Date.UTC(y, m - 1, dd); };
+    return Math.round((u(toYMD) - u(fromYMD)) / 86400000);
+  }
+  /**
+   * The contract checklist for one option, relative to the calendar date `todayYMD` (passed in, so this stays pure).
+   * Each date is 'unknown', 'upcoming', 'today' or 'passed'. The amount owed on cancellation is reported separately from
+   * the cancellation date: one is money, the other is a deadline, and either can be unknown.
+   */
+  function contractChecklist(option, todayYMD) {
+    const k = option.contract && typeof option.contract === 'object' ? option.contract : {};
+    const today = isCalendarDate(todayYMD) ? todayYMD : null;
+    const dates = CONTRACT_DATES.map(([key, label]) => {
+      const v = isCalendarDate(k[key]) ? k[key] : null;
+      if (!v) return { key, label, date: null, state: 'unknown', days: null };
+      const days = today ? daysBetween(today, v) : null;
+      return { key, label, date: v, state: days == null ? 'upcoming' : days < 0 ? 'passed' : days === 0 ? 'today' : 'upcoming', days };
+    });
+    const t = (x) => (typeof x === 'string' ? x.trim() : '');
+    const owed = option.cancellationOwed == null || option.cancellationOwed === '' ? null : d(ci(option.cancellationOwed));
+    const unresolved = dates.filter((x) => x.state === 'unknown').map((x) => x.label);
+    if (owed == null) unresolved.push('Amount owed if you cancel');
+    if (!t(k.quoteSource)) unresolved.push('Quote reference or source');
+    return {
+      quoteDate: isCalendarDate(k.quoteDate) ? k.quoteDate : null,
+      dates, cancellationOwed: owed,
+      quoteSource: t(k.quoteSource), cancellationNotes: t(k.cancellationNotes), weatherNotes: t(k.weatherNotes),
+      passed: dates.filter((x) => x.state === 'passed' || x.state === 'today').map((x) => x.label),
+      unresolved,
+    };
+  }
+
   const STATUS_LABELS = {
     not_enough_evidence: 'Not enough evidence to decide yet',
     not_viable_as_configured: 'Not viable as currently configured',
@@ -485,6 +640,7 @@
     participantStep, maxFeasible, feasibleCounts, normalizeParticipants,
     registrationCents, worstCase, cancellationExposure, roundHeadline,
     project, participantsNeeded, netCurve, sensitivity, scenarioContext, firmContext, decide, offerTerms, evidenceStatus,
+    whatWouldChange, compareOptions, contractChecklist, isCalendarDate, daysBetween, CONTRACT_DATES, CONTRACT_TEXT,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

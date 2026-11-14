@@ -40,6 +40,8 @@ jobs:
         run: python test/ui_review.py
       - name: Clarity and product correction
         run: python test/ui_clarity.py
+      - name: What would need to change, contract dates, save confidence
+        run: python test/ui_whatif.py
       - name: Volunteer journey
         run: |
           mkdir -p browser-evidence
