@@ -2,7 +2,7 @@
 
 A free, browser-only planner that helps booster clubs, PTAs and other small volunteer groups decide whether a fundraiser (a golf outing, a run or tournament, a dinner or gala, an auction or raffle night, or a product sale) is worth committing to **before** anyone signs a contract or orders stock.
 
-Volunteers enter real quotes, costs, sponsor commitments, money actually received and supporter-survey totals. The planner shows cash needed before the event, the loss if nobody comes or the event is canceled under the entered terms (and, when holding it could lose more, the worst point on the firm-money chart), how many sign-ups or sales are needed to break even, which assumptions matter, and what to verify before signing. "Not enough evidence to decide yet" is a normal, valid result. No result is a guarantee.
+Volunteers enter real quotes, costs, sponsor commitments, money actually received and supporter-survey totals. The planner shows cash needed before the event, the loss if nobody comes or the event is canceled under the entered terms (and, when holding it could lose more, the worst point on the firm-money chart), how many sign-ups or sales are needed to break even, which assumptions matter, and what to verify before signing. **What would need to change?** answers "what would it take?" for one option at one number the organizer picks: the extra firm sponsorship for break-even and for the goal, the headcount (only when more people actually help), typed-in price comparisons at the same headcount, and the other options side by side. Nothing there changes the plan until the organizer confirms "Use … in my plan". A per-option **contract dates and terms** checklist (quote expiry, deposit due, final headcount, cancellation deadline, quote reference, short notes) shows what is still unknown; dates never change the numbers. "Not enough evidence to decide yet" is a normal, valid result. No result is a guarantee.
 
 **Volunteers: start with [`docs/START_HERE.md`](docs/START_HERE.md)**, or open the planner and choose **How to use**.
 
@@ -36,6 +36,8 @@ node --test test/*.test.js     # engine tests (must pass)
 node scripts/build.js          # regenerates index.html and dist/
 python3 test/ui_smoke.py       # browser: every step, phone width, examples
 python3 test/ui_review.py      # browser: import safety, injected markup, keyboard access
+python3 test/ui_clarity.py     # browser: first-use wording, product-sale grouping correction
+python3 test/ui_whatif.py      # browser: what would need to change, applying a price, contract dates, time zones, phone tables
 python3 test/ui_journey.py     # browser: full session, reload, backup file, restore, print, widths, dark mode
 ```
 Optional: pass a folder to `ui_smoke.py` or `ui_journey.py` to save screenshots (and a print PDF from the journey).
@@ -60,6 +62,7 @@ CI (`.github/workflows/ci.yml`) runs the engine tests, the build and an `index.h
 - Opened files are type-checked and dry-run before anything is replaced. A failed import changes nothing, neither the plan on screen nor the saved copy.
 - A saved plan that fails the check at startup is kept aside (`bfp-plan-v1-unreadable`). If that copy can't be made, the app won't write over it and says changes aren't being saved.
 - Everything displayed is escaped. Imported text can't run as code (covered by `ui_review.py`).
+- Contract dates are optional (`option.contract`); older plans and files load unchanged, and a file with an impossible date is refused whole. "What would need to change?" boxes are never saved.
 
 ## Published website and future changes
 The [live planner](https://williamalseth10.github.io/fundraiser-planner/) is published through GitHub Pages from `main` / root. On November 13, 2026, main was `450b3a5e5e124f3944e09963f2ffe54c35c013cc`; the successful deployment and served HTML were verified. Publication is complete; do not repeat setup.

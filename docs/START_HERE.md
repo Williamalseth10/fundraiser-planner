@@ -28,6 +28,7 @@ You can start with some of this missing. Anything missing shows up on the result
 
 - [ ] **Written quote** from the course, venue or supplier: price per person or item, what it includes, tax and service charges, any minimum number or minimum bill, flat fees, and how many it can hold.
 - [ ] **Deposit terms:** how much, when it's due, whether it counts toward the bill, and whether (and until when) it's refundable.
+- [ ] **Key dates:** when the quote expires, when the final headcount (or order quantity) is due, and the last day to cancel.
 - [ ] **Cancellation terms:** what you'd owe if you cancel, and the deadline. Copy the dollar amount.
 - [ ] **Your prices:** the single price and any group or table price you'd actually put on the form.
 - [ ] **Other costs:** prizes, food not in the quote, printing, signs, insurance, supplies. Note which are paid before the event.
@@ -70,6 +71,10 @@ Download a fresh backup file whenever you've made changes you'd hate to lose.
 | **Supported by current evidence (not a guarantee)** | The numbers clear break-even and nothing is flagged. It still doesn't guarantee a profit or make a contract safe. |
 
 **Firm money** means ticket or sales money plus sponsorship that is paid or promised in writing. Break-even uses only firm money.
+
+**What would need to change?** Below the answers, pick an option and a number (your low, likely or high case, or another number). It shows how much more firm sponsorship would cover costs, and separately reach your goal, and how many people or sales would, but only when more of them actually helps. You can type one or two other prices to compare them at the same number. It can't know whether people would still come at a different price, and it says so. Nothing changes your plan unless you choose **Use … in my plan** and click again to confirm. Survey answers for the old price then stop counting until you re-ask.
+
+**Contract dates and terms.** On the quote step you can enter the quote date, when it expires, when the deposit and final headcount are due, the last day to cancel, where the quote came from, and short notes. Blank boxes show as **unknown** on the results and in the board summary. Dates never change the numbers, and the planner can't remind you when it's closed. Read tiered cancellation terms and weather rules yourself. A complete list doesn't mean a contract is safe or approved.
 
 ## 6. Sharing with the board
 - **Copy board summary** copies a written summary you can paste into an email.

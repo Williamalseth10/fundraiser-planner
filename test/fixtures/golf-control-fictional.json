@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "isDemo": false,
+  "eventName": "FICTIONAL PRACTICE — Booster Club Golf Day",
+  "settings": { "fundraisingTarget": 5000, "volunteerHourValue": null },
+  "snapshot": { "format": "Shotgun golf scramble, foursomes (fictional)", "dateWindow": "a Saturday in May (fictional)", "locationArea": "[fictional course area]", "included": "golf, cart, lunch, player gift", "beneficiary": "team equipment (fictional)", "fallbackPrice": "" },
+  "volunteerHoursAvailable": 120,
+  "scenarioSettings": {
+    "conservative": { "label": "Conservative", "statuses": ["collected"], "extraRevenuePerParticipant": 0, "otherRevenue": 0, "costContingencyPct": 0 },
+    "middle": { "label": "Middle", "statuses": ["collected", "committed"], "extraRevenuePerParticipant": 0, "otherRevenue": 0, "costContingencyPct": 0 },
+    "optimistic": { "label": "Optimistic", "statuses": ["collected", "committed", "hoped"], "extraRevenuePerParticipant": 0, "otherRevenue": 0, "costContingencyPct": 0 }
+  },
+  "options": [
+    {
+      "id": "golf", "name": "Shotgun golf day (fictional quote)", "kind": "golf_shotgun",
+      "capacity": 100, "groupSize": 4, "wholeGroupsOnly": true, "price": 125, "groupPrice": 500, "groupShare": 0.5,
+      "venueQuote": { "flatFee": 0, "perParticipant": 60, "minimumParticipants": 72, "minimumSpend": 0 },
+      "deposit": { "amount": 1000, "creditedTowardBill": true, "refundable": false },
+      "perParticipantCosts": [{ "id": "gift", "label": "Player gift", "amount": 5 }],
+      "fixedCosts": [{ "id": "other", "label": "Prizes, signs and printing", "amount": 800, "paidUpfront": true }],
+      "volunteerHours": 100, "cancellationOwed": 4320, "quoteVerified": true, "costsVerified": true, "upfrontFundingConfirmed": false,
+      "scenarioParticipants": { "conservative": 48, "middle": 72, "optimistic": 100 }
+    }
+  ],
+  "sponsorships": [
+    { "id": "sp1", "label": "Collected sponsor (fictional)", "amount": 1000, "status": "collected", "type": "cash", "optionId": "" },
+    { "id": "sp2", "label": "Written commitment (fictional)", "amount": 500, "status": "committed", "type": "cash", "optionId": "" },
+    { "id": "sp3", "label": "Hoped-for sponsor (fictional)", "amount": 500, "status": "hoped", "type": "cash", "optionId": "" }
+  ],
+  "evidence": {
+    "surveyResponses": 60,
+    "paidRegistrations": { "golf": 32 }, "paidCashReceived": { "golf": 4000 },
+    "namedHighIntent": { "golf": 40 }, "surveyDefinitelyAtPrice": { "golf": 0 }, "surveyProbablyAtPrice": { "golf": 20 },
+    "offerTerms": { "golf": { "kind": "golf_shotgun", "price": 12500, "groupSize": 4, "groupPrice": 50000, "format": "Shotgun golf scramble, foursomes (fictional)", "date": "a Saturday in May (fictional)", "place": "[fictional course area]", "included": "golf, cart, lunch, player gift", "supports": "team equipment (fictional)" } }
+  }
+}
