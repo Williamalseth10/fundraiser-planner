@@ -125,7 +125,7 @@ with sync_playwright() as p:
         check('negative margin: says more items won\'t help and never offers a sales count', 'More items won’t help here' in wi and 'items sold would break even' not in wi, wi)
         check('negative margin: offers the firm sponsorship gap instead ($250)', '$250 more sponsorship' in wi)
         fill(pg, '[data-whatif="prices.0"]', 8)
-        check('negative margin: a typed price below cost is flagged', 'Each extra item loses money at this price' in pg.inner_text('.whatif table'))
+        check('negative margin: a typed price below cost is flagged with the cost', 'Each extra item loses money: $8 is below the $15 cost per item.' in pg.inner_text('.whatif table'), pg.inner_text('.whatif table'))
         check('negative margin: loss card still names −$500 at 100 items', '−$500' in pg.inner_text('article.sum .cards'))
         check('negative margin: no page errors', not errs, errs)
         ctx.close()
@@ -261,6 +261,87 @@ with sync_playwright() as p:
         check('storage failure: no page errors', not errs, errs)
         ctx.close()
     section('storage failure', failing)
+
+    # 7. Preview = apply (row 82). A golf option with a foursome deal is switched to a product sale, so the product
+    #    option inherits hidden grouping. The preview must use that grouping, say so, and match the plan after applying.
+    def cell(pg, row, col):  # text of one cell in the price comparison table (col 0 = current plan)
+        return pg.evaluate("""([row, col]) => { const tr = [...document.querySelectorAll('.whatif table.wi-t tr')].find(r => r.querySelector('th') && r.querySelector('th').textContent.startsWith(row));
+          return tr ? tr.querySelectorAll('td')[col].innerText : null; }""", [row, col])
+    def card(pg):
+        return pg.inner_text('.whatif .wi-cards .card >> nth=0').split('\n')[1]
+    def inherited():
+        ctx, pg, errs = new(); pg.goto(URL)
+        pg.click('#app [data-action="start-blank"]'); pg.wait_for_function("location.hash === '#step-event'")
+        pg.goto(URL + '#step-prices'); pg.wait_for_timeout(120)
+        fill(pg, path('options.0.price'), 10); fill(pg, path('options.0.groupPrice'), 30); fill(pg, path('options.0.groupShare'), 50)
+        pg.goto(URL + '#step-options'); pg.wait_for_timeout(120)
+        pg.select_option(path('options.0.kind'), 'product'); pg.wait_for_timeout(120)
+        pg.goto(URL + '#step-quote'); pg.wait_for_timeout(120)
+        fill(pg, path('options.0.venueQuote.perParticipant'), 6); fill(pg, path('options.0.capacity'), 100)
+        check('parity setup: product option kept the inherited grouping', 'Check inherited group settings' in pg.inner_text('#app'))
+        pg.goto(URL + '#results'); pg.wait_for_timeout(200)
+        pg.select_option('[data-whatif="at"]', 'custom'); pg.wait_for_timeout(120); fill(pg, '[data-whatif="custom"]', 48)
+        fill(pg, '[data-whatif="prices.0"]', 12); fill(pg, '[data-whatif="prices.1"]', 12); fill(pg, '[data-whatif="groups.1"]', 44)
+        wi = pg.inner_text('.whatif')
+        check('parity: what-if warns that the product option still has group settings and uses them', 'still has group settings' in wi and 'groups of 4' in wi and '50% assumed to buy as a group at $30' in wi, wi[:1500])
+        check('parity: group price boxes appear for the inherited grouping', pg.locator('[data-whatif="groups.0"]').count() == 1 and 'keep $30' in (pg.get_attribute('[data-whatif="groups.0"]', 'placeholder') or ''))
+        check('parity: blank group box keeps the $30 deal, and says so', '$30' in (cell(pg, 'Price for a full group of 4', 1) or '') and 'your current deal, kept' in (cell(pg, 'Price for a full group of 4', 1) or ''), cell(pg, 'Price for a full group of 4', 1))
+        prevA, prevB = cell(pg, 'Firm money at 48', 1), cell(pg, 'Firm money at 48', 2)
+        # 48 items, 50% in groups: 6 groups + 24 singles at $12, minus 48 x $6. $30 groups: $180. $44 groups: $264.
+        check('parity: previews are $180 (deal kept) and $264 (typed $44 group price)', prevA == '$180' and prevB == '$264', (prevA, prevB))
+        before = json.loads(plan_json(pg))['options'][0]
+        pg.click('[data-action="apply-price"][data-k="0"]'); pg.click('[data-action="apply-price"][data-k="0"]'); pg.wait_for_timeout(250)
+        st = pg.inner_text('#status')
+        check('parity A: after applying, firm money at 48 equals the preview ($180)', card(pg) == prevA and 'firm money is now $180, as previewed' in st, (card(pg), st))
+        after = json.loads(plan_json(pg))['options'][0]
+        check('parity A: grouping kept exactly (size, whole groups, share, $30 deal)', all(after[k] == before[k] for k in ('groupSize', 'wholeGroupsOnly', 'groupShare')) and after['groupPrice'] == 30 and after['price'] == 12, {k: after[k] for k in ('groupSize', 'wholeGroupsOnly', 'groupShare', 'groupPrice', 'price')})
+        check('parity A: the message says the deal was kept', 'your $30 group deal kept' in st and 'group settings unchanged' in st, st)
+        fill(pg, '[data-whatif="prices.1"]', 12); fill(pg, '[data-whatif="groups.1"]', 44)
+        prevB = cell(pg, 'Firm money at 48', 1)
+        pg.click('[data-action="apply-price"][data-k="1"]'); pg.click('[data-action="apply-price"][data-k="1"]'); pg.wait_for_timeout(250)
+        after = json.loads(plan_json(pg))['options'][0]
+        check('parity B: typed $44 group price, firm money after applying equals the preview', card(pg) == prevB == '$264' and after['groupPrice'] == 44 and 'as previewed' in pg.inner_text('#status'), (prevB, card(pg), after['groupPrice']))
+        pg.reload(); pg.wait_for_timeout(200)
+        pg.select_option('[data-whatif="at"]', 'custom'); pg.wait_for_timeout(120); fill(pg, '[data-whatif="custom"]', 48)
+        check('parity: the applied result survives a refresh', card(pg) == '$264', card(pg))
+        shot(pg, 'parity-inherited-product', full_page=True)
+        check('parity: no page errors', not errs, errs)
+        ctx.close()
+    section('preview equals apply', inherited)
+
+    def golf_parity():
+        ctx, pg, errs = new(); pg.goto(URL); open_file(pg, CONTROL)
+        pg.goto(URL + '#results'); pg.wait_for_timeout(200)
+        pg.select_option('[data-whatif="at"]', 'conservative'); pg.wait_for_timeout(120)
+        fill(pg, '[data-whatif="prices.0"]', 150); fill(pg, '[data-whatif="groups.0"]', 560)
+        prev = cell(pg, 'Firm money at 48', 1)
+        pg.click('[data-action="apply-price"][data-k="0"]'); pg.click('[data-action="apply-price"][data-k="0"]'); pg.wait_for_timeout(250)
+        check('golf parity: $150/$560 preview $1,960 equals firm money after applying', prev == '$1,960' and card(pg) == '$1,960', (prev, card(pg)))
+        check('golf parity: no page errors', not errs, errs)
+        ctx.close()
+    section('golf preview equals apply', golf_parity)
+
+    # 8. Mixed single/group pricing is described per kind of sale, never as "each extra player loses money" (row 82)
+    def mixed():
+        ctx, pg, errs = new(); pg.goto(URL); open_file(pg, CONTROL)
+        pg.goto(URL + '#results'); pg.wait_for_timeout(200)
+        pg.select_option('[data-whatif="at"]', 'custom'); pg.wait_for_timeout(120); fill(pg, '[data-whatif="custom"]', 76)
+        fill(pg, '[data-whatif="prices.0"]', 125); fill(pg, '[data-whatif="groups.0"]', 200)
+        fill(pg, '[data-whatif="prices.1"]', 60); fill(pg, '[data-whatif="groups.1"]', 200)
+        a, cur, bb = cell(pg, 'Money from one more sale', 1) or '', cell(pg, 'Money from one more sale', 0) or '', cell(pg, 'Money from one more sale', 2) or ''
+        check('mixed: no blanket "each extra player loses money" for $125 singles with $200 foursomes', 'Each extra player loses money' not in a and 'Every extra sale' not in a, a)
+        check('mixed: says the foursome loses $60 and the single still covers its cost (+$60)', 'A full foursome of 4 at $200 loses $60' in a and 'single player at $125 still covers its cost (+$60)' in a, a)
+        check('mixed: gives the exact change for the next foursome using the 50% guess', 'using your 50% foursome guess' in a, a)
+        check('mixed: the current plan covers its cost', cur.startswith('Covers its cost'), cur)
+        check('mixed: when singles and foursomes both lose, it says every extra sale loses money', 'Every extra sale loses money' in bb, bb)
+        pg.select_option('[data-whatif="at"]', 'conservative'); pg.wait_for_timeout(150)
+        under = cell(pg, 'Money from one more sale', 1) or ''
+        # under the 72-player minimum each extra player costs only the $5 gift, so no price here loses money: no warning row
+        check('mixed: under the 72-player minimum nothing is called a loss (extra players cost only the $5 gift)', under == '' and 'loses' not in pg.inner_text('.whatif table'), under)
+        shot(pg, 'mixed-pricing-wording', full_page=True)
+        check('mixed: no page errors', not errs, errs)
+        ctx.close()
+    section('mixed pricing wording', mixed)
     b.close()
 
 for n, ok, det in results: print(('PASS ' if ok else 'FAIL ') + n + ('' if ok or not det else f'  [{det}]'))

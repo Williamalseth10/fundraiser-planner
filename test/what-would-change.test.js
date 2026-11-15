@@ -81,9 +81,9 @@ test('negative margin: never suggests more sales, and 50 items stay 50 with indi
   assert.equal(E.whatWouldChange(s, o, { participants: 100 }).net, -500);
   // a typed-in comparison price below cost is flagged as losing money on each extra item
   const [p8, p20] = E.whatWouldChange(s, o, { participants: 50, prices: [{ price: 8 }, { price: 20 }] }).prices;
-  assert.equal(p8.losesPerExtra, true);
+  assert.equal(p8.margins.loses, 'all');
   assert.equal(p8.net, -350);
-  assert.equal(p20.losesPerExtra, false);
+  assert.equal(p20.margins.loses, 'none');
   assert.equal(p20.net, 250);
   // the inherited golf grouping (row 76) is visible as rounding, never silent
   const g = { ...o, groupSize: 4, wholeGroupsOnly: true };
@@ -103,7 +103,7 @@ test('zero price with a per-guest charge: more guests lower the result and break
   assert.equal(w.headcount.moreHelps, false);
   assert.equal(w.headcount.toBreakEven, null);
   assert.equal(w.headcount.breakEvenBelow, 0);
-  assert.equal(w.prices[0].losesPerExtra, true);
+  assert.equal(w.prices[0].margins.loses, 'all');
 });
 
 test('price comparison keeps paid tickets at the money received and leaves the plan untouched', () => {
@@ -117,16 +117,127 @@ test('price comparison keeps paid tickets at the money received and leaves the p
   assert.equal(free.net, 4000 + 1500 - 5360);
   // 16 new players at 50% group share: 2 foursomes at $560 + 8 singles at $150
   assert.equal(p150.net, 4000 + 2 * 560 + 8 * 150 + 1500 - 5360);
-  assert.equal(p150.groupPriceDefaulted, false);
+  assert.equal(p150.groupPriceSource, 'typed');
   assert.equal(p110.groupPrice, 440);
-  assert.equal(p110.groupPriceDefaulted, true);
+  assert.equal(p110.groupPriceSource, 'none'); // $500 was exactly 4 x $125: no deal to keep
   assert.equal(p110.goalParticipants, 88);
 });
 
-test('a group discount below the per-person cost is flagged even when the single price covers it', () => {
+test('mixed pricing: only full groups lose money, and the margins say which (row 82)', () => {
   const s = control(), o = s.options[0];
-  const [p] = E.whatWouldChange(s, o, { participants: 48, prices: [{ price: 125, groupPrice: 200 }] }).prices;
-  assert.equal(p.losesPerExtra, true); // $50 per player in a $200 foursome is below the $65 cost per player
+  // at 76 players the 72-player minimum is passed, so each player costs $60 + $5
+  const [p] = E.whatWouldChange(s, o, { participants: 76, prices: [{ price: 125, groupPrice: 200 }] }).prices;
+  assert.equal(p.margins.loses, 'group');
+  assert.equal(p.margins.costPerUnit, 65);
+  assert.equal(p.margins.singleMargin, 60);     // a single player still covers their cost
+  assert.equal(p.margins.groupMargin, -60);     // a $200 foursome costs 4 x $65 = $260
+  assert.equal(p.margins.belowMinimum, false);
+  // the exact next step: 4 more players, with the 50% group guess, change firm money by this much
+  const at = (n, alt) => E.project(alt, n, E.firmContext(s, alt)).net;
+  const alt = { ...o, price: 125, groupPrice: 200 };
+  assert.equal(p.nextChange, at(80, alt) - at(76, alt));
+  // singles below cost but a group premium above it: only singles lose
+  const [q] = E.whatWouldChange(s, o, { participants: 76, prices: [{ price: 60, groupPrice: 300 }] }).prices;
+  assert.equal(q.margins.loses, 'single');
+  // both below cost: everything loses
+  const [r] = E.whatWouldChange(s, o, { participants: 76, prices: [{ price: 60, groupPrice: 200 }] }).prices;
+  assert.equal(r.margins.loses, 'all');
+  // nobody assumed to buy as a group: a cheap group price is irrelevant, and singles decide
+  const o0 = { ...o, groupShare: 0 };
+  assert.equal(E.whatWouldChange(s, o0, { participants: 76, prices: [{ price: 125, groupPrice: 200 }] }).prices[0].margins.loses, 'none');
+});
+
+test('below a venue minimum an extra player costs only the other per-person costs', () => {
+  const s = control(), o = s.options[0];
+  const m = E.pricingMargins(o, 48);            // the 72-player course minimum is already billed
+  assert.equal(m.belowMinimum, true);
+  assert.equal(m.costPerUnit, 5);
+  assert.equal(E.pricingMargins(o, 72).costPerUnit, 65);
+  // a minimum BILL TOTAL works the same way: $3,000 covers 50 players at $60 (players come in foursomes)
+  const spend = { ...o, venueQuote: { ...o.venueQuote, minimumParticipants: 0, minimumSpend: 3000 }, deposit: { amount: 0, creditedTowardBill: true, refundable: true } };
+  assert.equal(E.pricingMargins(spend, 44).costPerUnit, 5);   // 44 -> 48: still inside the $3,000
+  assert.equal(E.pricingMargins(spend, 48).costPerUnit, 35);  // 48 -> 52 crosses it: bill $3,000 -> $3,120, $30 each + $5
+  assert.equal(E.pricingMargins(spend, 52).costPerUnit, 65);
+  // and a non-refundable credited deposit that sets a floor on the bill: $1,000 covers 16 players at $60
+  const floor = { ...o, venueQuote: { ...o.venueQuote, minimumParticipants: 0 } };
+  assert.equal(E.pricingMargins(floor, 8).costPerUnit, 5);
+  assert.equal(E.pricingMargins(floor, 20).costPerUnit, 65);
+});
+
+test('the dip reason in decide() names which kind of sale loses money, never a blanket rule', () => {
+  // 80% of players come in a $100 foursome (4 x $65 = $260 cost, so each foursome loses $160); singles pay $125 and
+  // cover their $65, but not enough of them to make up for it. Nobody has paid yet; the 40 named answers are recorded
+  // for this exact offer. (At a 50% share the singles outweigh the foursomes and net never dips: that is the point.)
+  const s = control(), o = s.options[0];
+  Object.assign(o, { price: 125, groupPrice: 100, groupShare: 0.8, wholeGroupsOnly: true });
+  o.venueQuote.minimumParticipants = 0;
+  s.evidence.paidRegistrations = { golf: 0 }; s.evidence.paidCashReceived = {};
+  s.evidence.offerTerms = { golf: E.offerTerms(o, s.snapshot) };
+  const d = E.decide(s, o);
+  const curve = E.netCurve(o, E.firmContext(s, o));
+  assert.ok(d.breakEven.nonMonotonic, JSON.stringify(curve.slice(0, 12)));
+  assert.equal(d.breakEven.participants, 4);
+  assert.equal(d.breakEven.dipsAt, 40);
+  assert.equal(d.status, 'high_risk');
+  const dip = d.reasons.find((r) => /falls below zero again/.test(r));
+  assert.ok(dip, d.reasons.join(' | '));
+  assert.doesNotMatch(dip, /each extra person costs more than they pay/);
+  assert.match(dip, /a full group of 4 at \$100\.00 costs more than it pays \(cost \$65\.00 each\), while a single person at \$125\.00 still covers its cost/);
+  // when every buyer is in a whole group there are no singles: then it is "every extra sale", stated with the group price
+  const all = E.pricingMargins({ ...o, groupShare: 1 }, 40);
+  assert.equal(all.singlesUsed, false);
+  assert.equal(all.loses, 'all');
+  // and the old sentence still appears when every sale loses money
+  const p = clone(D.BLANK_STATE), x = p.options[0];
+  Object.assign(x, { kind: 'ticketed', price: 0, capacity: 120, groupSize: 1, wholeGroupsOnly: false });
+  x.venueQuote.perParticipant = 12; x.quoteVerified = true;
+  p.sponsorships = [{ id: 'a', label: 'Firm', amount: 600, status: 'committed', type: 'cash', optionId: '' }];
+  p.evidence.paidRegistrations = { opt1: 10 }; p.evidence.paidCashReceived = { opt1: 0 }; p.evidence.surveyResponses = 5;
+  const dx = E.decide(p, x);
+  assert.match(dx.reasons.join(' '), /each extra person costs more than they pay \(price \$0\.00, cost \$12\.00 each\)/);
+});
+
+test('preview and apply give identical money: one shared hypotheticalPrice for every kind of option (row 82)', () => {
+  const s0 = control();
+  const blankProduct = () => {
+    const s = clone(D.BLANK_STATE), o = s.options[0];
+    // a blank plan switched to a product sale keeps golf grouping (groups of 4, whole groups); add an inherited deal
+    Object.assign(o, { kind: 'product', price: 10, capacity: 100, groupPrice: 30, groupShare: 0.5 });
+    o.venueQuote.perParticipant = 6; s.scenarioSettings.conservative.costContingencyPct = 0;
+    return s;
+  };
+  const cases = [
+    ['product with inherited grouping and a $30 group deal', blankProduct(), [{ price: 12 }, { price: 12, groupPrice: 44 }, { price: 0 }]],
+    ['product with groups of 4 and no deal', (() => { const s = blankProduct(); s.options[0].groupPrice = null; return s; })(), [{ price: 12 }]],
+    ['product with individual items and a leftover group price', (() => { const s = blankProduct(); Object.assign(s.options[0], { groupSize: 1, wholeGroupsOnly: false }); return s; })(), [{ price: 12 }]],
+    ['golf control, no deal', s0, [{ price: 150 }, { price: 150, groupPrice: 560 }, { price: 110 }]],
+    ['golf with a $460 foursome deal', (() => { const s = control(); s.options[0].groupPrice = 460; return s; })(), [{ price: 150 }, { price: 140, groupPrice: 520 }]],
+    ['gala tables of 8', clone(D.DEMO_GALA), [{ price: 90 }, { price: 90, groupPrice: 640 }]],
+  ];
+  for (const [label, s, prices] of cases) {
+    const o = s.options[0];
+    for (const req of [{ participants: 48 }, { participants: 50 }, { scenario: 'conservative' }, { scenario: 'optimistic' }]) {
+      const r = { ...req, participants: req.participants ?? o.scenarioParticipants[req.scenario] };
+      const w = E.whatWouldChange(s, o, { ...r, prices });
+      w.prices.forEach((pr, k) => {
+        const applied = { ...clone(o), price: pr.apply.price, groupPrice: pr.apply.groupPrice };
+        const after = E.whatWouldChange({ ...s, options: [applied, ...s.options.slice(1)] }, applied, r);
+        assert.equal(after.net, pr.net, `${label}, price ${JSON.stringify(prices[k])}, ${JSON.stringify(r)}`);
+        assert.equal(after.basis.groupPrice, pr.groupPrice, label);
+        for (const f of ['groupSize', 'wholeGroupsOnly', 'groupShare']) assert.equal(applied[f], o[f], `${label}: ${f} kept`);
+      });
+    }
+  }
+  // the reproduced case: the inherited $30 deal is kept and shown, not silently dropped
+  const s = blankProduct(), o = s.options[0];
+  const [p] = E.whatWouldChange(s, o, { participants: 48, prices: [{ price: 12 }] }).prices;
+  assert.equal(p.groupPriceSource, 'kept');
+  assert.equal(p.apply.groupPrice, 30);
+  assert.equal(p.groupPrice, 30);
+  assert.equal(p.net, 180);
+  // with no grouping the stored group price is left exactly as it was
+  const one = { ...o, groupSize: 1, wholeGroupsOnly: false };
+  assert.deepEqual(E.hypotheticalPrice(one, { price: 12 }), { price: 12, groupPrice: 30, groupPriceSource: 'not_grouped' });
 });
 
 test('sponsorship tied to another option does not count for this one', () => {

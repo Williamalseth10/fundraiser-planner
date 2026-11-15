@@ -418,8 +418,6 @@
     let status;
     const assumedWords = (u) => u.join(', ').replace(/, ([^,]*)$/, ' and $1');
     // Selling one more costs more than it brings in (e.g. free admission with a per-guest charge).
-    const perUnitCost = ci((option.venueQuote || {}).perParticipant) + (option.perParticipantCosts || []).reduce((s, l) => s + ci(l.amount), 0);
-    const losesPerExtra = ci(option.price) < perUnitCost;
     if (!be.reachableWithinCapacity && conditional && conditional.reachableWithinCapacity) {
       status = 'high_risk';
       reasons.push(`Tickets and firm sponsorship can't cover costs even at full capacity (${be.maxFeasible}). It works only if your low-case estimates for ${assumedWords(conditional.uses)} actually arrive${conditional.participants > 0 ? `, with at least ${conditional.participants} paying` : ''}. Those are assumptions, not commitments.`);
@@ -434,7 +432,14 @@
       reasons.push(`Break-even needs ${be.participants} participants; paid registrations (${paid}) plus named “yes” answers for the current offer (${namedCounted}) total ${paid + namedCounted}.${named > namedCounted ? ` ${named} named answers aren't counted because they were for different or unrecorded terms.` : ''} Anonymous “yes” answers (${definitely}) are shown but not counted toward this check.`);
     } else if (be.nonMonotonic) {
       status = 'high_risk';
-      reasons.push(`Costs are covered at ${be.participants}, but money left falls below zero again at ${be.dipsAt}${losesPerExtra ? `: each extra ${option.kind === 'product' ? 'item' : 'person'} costs more than they pay (price ${usd(d(ci(option.price)))}, cost ${usd(d(perUnitCost))} each)` : ', because of group pricing or a minimum'}. Check the chart before relying on a single break-even number.`);
+      // Why it dips, from the margins just before the dip: singles and full groups are judged separately (row 82).
+      const m = pricingMargins(option, Math.max(0, be.dipsAt - participantStep(option)));
+      const one = option.kind === 'product' ? 'item' : 'person';
+      const why = m.loses === 'all' ? `: each extra ${one} costs more than they pay (${m.singlesUsed ? `price ${usd(m.price)}` : ''}${m.singlesUsed && m.groupsUsed ? ', ' : ''}${m.groupsUsed ? `${usd(m.groupPrice)} per group of ${m.groupSize}` : ''}, cost ${usd(m.costPerUnit)} each)`
+        : m.loses === 'group' ? `: a full group of ${m.groupSize} at ${usd(m.groupPrice)} costs more than it pays (cost ${usd(m.costPerUnit)} each), while a single ${one} at ${usd(m.price)} still covers its cost`
+          : m.loses === 'single' ? `: a single ${one} at ${usd(m.price)} costs more than it pays (cost ${usd(m.costPerUnit)}), while a full group of ${m.groupSize} at ${usd(m.groupPrice)} still covers its cost`
+            : ', because of group pricing or a minimum';
+      reasons.push(`Costs are covered at ${be.participants}, but money left falls below zero again at ${be.dipsAt}${why}. Check the chart before relying on a single break-even number.`);
     } else if (cons.net < 0) {
       status = 'high_risk';
       reasons.push(`The conservative scenario loses ${usd(Math.abs(cons.net))}.`);
@@ -470,6 +475,70 @@
       status, reasons, missing, exposure, breakEven: be, targetNeeded: tg, conservative: cons, firm, paid, named, namedCounted, definitely, responses, evidence,
       worst, cancel, proceedsLow, conditional,
       beWithLowProceeds: conditional, // kept for older callers
+    };
+  }
+
+  /** Price for one full group, in cents: the group price entered, or group size x the single price when it is blank. */
+  function groupPriceCents(option) {
+    const size = Math.max(1, int(option.groupSize) || 1);
+    const gp = option.groupPrice !== undefined ? option.groupPrice : option.foursomePrice;
+    return gp == null || gp === '' ? ci(option.price) * size : ci(gp);
+  }
+  // A real group deal: a group price that differs from size x the single price. A blank or equal one is "no deal".
+  function hasGroupDeal(option, gp) {
+    const size = Math.max(1, int(option.groupSize) || 1);
+    return size > 1 && gp != null && gp !== '' && ci(gp) !== ci(option.price) * size;
+  }
+
+  /**
+   * The price fields a typed-in hypothetical price gives the option. Used for BOTH the preview and
+   * "Use … in my plan", so the two can never disagree (row 82). Group settings (size, whole groups, share) are never
+   * touched. The group price is:
+   *   typed       - the organizer typed one;
+   *   kept        - box left blank and the option has a group deal: the deal is kept exactly as it is (never dropped silently);
+   *   none        - box left blank and there is no deal: a group pays group size x the new price;
+   *   not_grouped - group size 1: the stored group price is left exactly as it was (it has no effect on the money).
+   */
+  function hypotheticalPrice(option, typed) {
+    const size = Math.max(1, int(option.groupSize) || 1);
+    const gpNow = option.groupPrice !== undefined ? option.groupPrice : option.foursomePrice;
+    const price = d(ci(typed && typed.price));
+    const tg = typed ? typed.groupPrice : null;
+    if (size < 2) return { price, groupPrice: gpNow === undefined ? null : gpNow, groupPriceSource: 'not_grouped' };
+    if (tg != null && tg !== '' && Number.isFinite(Number(tg)) && Number(tg) >= 0) return { price, groupPrice: d(ci(tg)), groupPriceSource: 'typed' };
+    if (hasGroupDeal(option, gpNow)) return { price, groupPrice: d(ci(gpNow)), groupPriceSource: 'kept' };
+    return { price, groupPrice: null, groupPriceSource: 'none' };
+  }
+
+  /**
+   * What one more sale brings in against what it costs, separately for a single ticket and for a full group, at
+   * participant count n. With mixed pricing one kind can lose money while the other covers its cost, so the answer is
+   * 'all' only when every kind of sale that can happen loses money:
+   *   none | single (singles lose, groups cover) | group (groups lose, singles cover) | all
+   * The venue's share of the cost is what the venue bill actually goes up by for the next sale (venueBillCents), so a
+   * minimum headcount, a minimum bill total or a non-refundable deposit floor that already covers the next one is
+   * respected: until that minimum is used up, an extra one costs only the other per-person costs.
+   */
+  function pricingMargins(option, n) {
+    const size = Math.max(1, int(option.groupSize) || 1);
+    const share = Math.min(1, nonNeg(option.groupShare !== undefined ? option.groupShare : option.foursomeShare));
+    const other = (option.perParticipantCosts || []).reduce((s, l) => s + ci(l.amount), 0);
+    const minimum = int((option.venueQuote || {}).minimumParticipants);
+    const step = participantStep(option), at = int(n);
+    const venueNext = Math.round((venueBillCents(option, at + step).bill - venueBillCents(option, at).bill) / step);
+    const belowMinimum = venueNext < ci((option.venueQuote || {}).perParticipant);
+    const cost = venueNext + other;
+    const single = ci(option.price) - cost;
+    const groupsUsed = size > 1 && share > 0;
+    const group = size > 1 ? groupPriceCents(option) - cost * size : null;
+    // With every buyer in a group and whole groups only, nobody ever pays the single price.
+    const singlesUsed = !(groupsUsed && share >= 1 && option.wholeGroupsOnly);
+    const singleLoses = singlesUsed && single < 0, groupLoses = groupsUsed && group < 0;
+    const loses = (singleLoses || !singlesUsed) && (groupLoses || !groupsUsed) && (singleLoses || groupLoses) ? 'all' : singleLoses ? 'single' : groupLoses ? 'group' : 'none';
+    return {
+      costPerUnit: d(cost), belowMinimum, minimum, price: d(ci(option.price)), singleMargin: d(single),
+      groupSize: size, groupShare: share, groupsUsed, singlesUsed, groupPrice: size > 1 ? d(groupPriceCents(option)) : null, groupMargin: group == null ? null : d(group),
+      loses,
     };
   }
 
@@ -510,26 +579,28 @@
     const tg = participantsNeeded(option, target, firmCtx);
     const be = participantsNeeded(option, 0, firmCtx);
     const sp = sponsorshipCashCents(option, firmCtx.sponsorships, firmCtx.statuses);
-    const perUnitCost = ci((option.venueQuote || {}).perParticipant) + (option.perParticipantCosts || []).reduce((s, l) => s + ci(l.amount), 0);
     const size = Math.max(1, int(option.groupSize) || 1);
     const gpNow = option.groupPrice !== undefined ? option.groupPrice : option.foursomePrice;
-    const priceFor = (alt) => {
+    const priceFor = (typed) => {
+      // The SAME option the plan would hold after "Use … in my plan" (hypotheticalPrice), so preview and apply agree.
+      const hyp = hypotheticalPrice(option, typed);
+      const alt = { ...option, price: hyp.price, groupPrice: hyp.groupPrice, foursomePrice: undefined };
       const r = project(alt, n, firmCtx), rc = c(r.net);
       const beA = participantsNeeded(alt, 0, firmCtx), tgA = participantsNeeded(alt, target, firmCtx);
-      const gp = size > 1 ? (alt.groupPrice == null || alt.groupPrice === '' ? ci(alt.price) * size : ci(alt.groupPrice)) : null;
-      // Lowest money one more person or item could bring in (a group discount lowers it) against what each one costs.
-      const lowestPerUnit = gp != null && nonNeg(alt.groupShare) > 0 ? Math.min(ci(alt.price), Math.floor(gp / size)) : ci(alt.price);
+      const nx = n + step <= maxFeasible(alt) ? project(alt, n + step, firmCtx) : null;
       return {
-        price: d(ci(alt.price)), groupPrice: gp == null ? null : d(gp), groupPriceDefaulted: size > 1 && (alt.groupPrice == null || alt.groupPrice === ''),
+        price: hyp.price, groupPrice: size > 1 ? d(groupPriceCents(alt)) : null, groupPriceSource: hyp.groupPriceSource,
+        apply: { price: hyp.price, groupPrice: hyp.groupPrice },
         participants: r.participants, net: d(rc), changeFromCurrent: d(rc - netC),
+        nextParticipants: nx ? nx.participants : null, nextChange: nx ? d(c(nx.net) - rc) : null,
         sponsorshipToBreakEven: d(Math.max(0, -rc)), sponsorshipToGoal: target > 0 ? d(Math.max(0, goalC - rc)) : null,
         breakEven: beA.reachableWithinCapacity ? beA.participants : null, breakEvenDipsAt: beA.dipsAt,
         goalParticipants: target > 0 && tgA.reachableWithinCapacity ? tgA.participants : null,
-        losesPerExtra: lowestPerUnit < perUnitCost,
+        margins: pricingMargins(alt, n),
       };
     };
     const prices = (req.prices || []).filter((p) => p && p.price !== '' && p.price != null && Number.isFinite(Number(p.price)) && Number(p.price) >= 0)
-      .map((p) => priceFor({ ...option, price: Number(p.price), groupPrice: p.groupPrice === '' || p.groupPrice == null ? null : nonNeg(p.groupPrice), foursomePrice: undefined }));
+      .map((p) => priceFor(p));
     return {
       basis: {
         requested: at.requested, participants: n, flags: at.flags, maxFeasible: maxFeasible(option), step,
@@ -540,8 +611,11 @@
         minimumParticipants: int((option.venueQuote || {}).minimumParticipants),
         costCushionPct: nonNeg(firmCtx.costContingencyPct), paid: int(firmCtx.paidRegistrations),
         paidCash: firmCtx.paidRegistrationCash == null || firmCtx.paidRegistrationCash === '' ? null : d(ci(firmCtx.paidRegistrationCash)),
-        price: d(ci(option.price)), groupPrice: size > 1 ? (gpNow == null || gpNow === '' ? d(ci(option.price) * size) : d(ci(gpNow))) : null, groupSize: size,
+        price: d(ci(option.price)), groupPrice: size > 1 ? d(groupPriceCents(option)) : null, groupSize: size,
+        groupShare: Math.min(1, nonNeg(option.groupShare !== undefined ? option.groupShare : option.foursomeShare)), wholeGroupsOnly: !!option.wholeGroupsOnly,
+        groupPriceIsDeal: hasGroupDeal(option, gpNow),
       },
+      margins: pricingMargins(option, n),
       net: d(netC), revenue: at.revenue.total, expenses: at.expenses.total, venueMinimumApplied: at.expenses.venueMinimumApplied,
       target,
       sponsorship: { toBreakEven: d(Math.max(0, -netC)), toGoal: target > 0 ? d(Math.max(0, goalC - netC)) : null },
@@ -640,7 +714,7 @@
     participantStep, maxFeasible, feasibleCounts, normalizeParticipants,
     registrationCents, worstCase, cancellationExposure, roundHeadline,
     project, participantsNeeded, netCurve, sensitivity, scenarioContext, firmContext, decide, offerTerms, evidenceStatus,
-    whatWouldChange, compareOptions, contractChecklist, isCalendarDate, daysBetween, CONTRACT_DATES, CONTRACT_TEXT,
+    whatWouldChange, compareOptions, hypotheticalPrice, pricingMargins, contractChecklist, isCalendarDate, daysBetween, CONTRACT_DATES, CONTRACT_TEXT,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -809,12 +809,27 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       prices: slots.map((k) => ({ price: Number(whatIf.prices[k]), groupPrice: usable(whatIf.groups[k]) ? Number(whatIf.groups[k]) : null })),
     };
   }
+  // One more sale, in words: singles and full groups are described separately, so mixed pricing is never summed up as
+  // "each extra one loses money" when only one kind does.
+  function marginWords(m, t) {
+    const g = `full ${t.groupName || 'group'} of ${m.groupSize}`;
+    const cost = `${money(m.costPerUnit)} cost per ${t.one}${m.belowMinimum ? ` while the ${t.venue}’s minimum still covers the next one` : ''}`;
+    if (m.loses === 'all') return m.groupsUsed && !m.singlesUsed
+      ? `Every extra sale loses money: everyone buys as a ${g} at ${money(m.groupPrice)}, which is below ${m.groupSize} × the ${cost}.`
+      : m.groupsUsed
+      ? `Every extra sale loses money: a single ${t.one} at ${money(m.price)} and a ${g} at ${money(m.groupPrice)} are both below the ${cost}.`
+      : `Each extra ${t.one} loses money: ${money(m.price)} is below the ${cost}.`;
+    if (m.loses === 'group') return `A ${g} at ${money(m.groupPrice)} loses ${money(-m.groupMargin)} (the ${cost} is more than the ${t.groupName || 'group'} price per ${t.one}). A single ${t.one} at ${money(m.price)} still covers its cost (+${money(m.singleMargin)}).`;
+    if (m.loses === 'single') return `A single ${t.one} at ${money(m.price)} loses ${money(-m.singleMargin)} against the ${cost}. A ${g} at ${money(m.groupPrice)} still covers its cost (+${money(m.groupMargin)}).`;
+    return '';
+  }
   function renderWhatIf() {
     if (!state.options[whatIf.opt]) whatIf.opt = 0;
     const i = whatIf.opt, o = state.options[i], t = T(o), ss = state.scenarioSettings;
     const req = whatIfRequest(o), w = E.whatWouldChange(state, o, req), b = w.basis;
     const unitMany = t.survey === 'buy' ? 'items sold' : `paying ${t.many}`;
-    const group = !!t.groupName && b.groupSize > 1;
+    // Group rows follow what the engine actually does (group size > 1), including grouping a product option inherited.
+    const group = b.groupSize > 1, gName = t.groupName || 'group', gOf = `${gName} of ${b.groupSize}`;
     const target = w.target;
     const firmWords = b.statuses.length === 2 ? 'collected or promised in writing' : b.statuses[0] === 'collected' ? 'already collected' : b.statuses.length ? 'promised in writing' : 'none';
     const sc = req.scenario ? ss[req.scenario].label : null;
@@ -841,7 +856,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       if (w.headcount.moreHelps && w.headcount.toGoal != null) goalText += ` Or, if they actually pay, ${w.headcount.toGoal} ${esc(unitMany)} would reach it on this basis.`;
       else if (!w.goal.reachableWithinCapacity) goalText += ` <strong>No number up to capacity (${b.maxFeasible}) reaches the goal under these prices and costs:</strong> the most firm money gets to is ${hm(w.goal.bestOnChart.net)} at ${w.goal.bestOnChart.participants}, still ${hm(w.goal.sponsorshipAtBest)} short.`;
     }
-    if (!w.headcount.moreHelps && w.headcount.nextParticipants != null) lines.push(`<b>More ${esc(t.many)} won’t help here.</b> Going from ${b.participants} to ${w.headcount.nextParticipants} changes firm money by ${hm(w.headcount.nextChange)}${w.headcount.nextChange < 0 ? `: each extra one costs more than it brings in` : ''}${w.headcount.breakEvenBelow != null ? `. Firm money breaks even at a smaller number (${w.headcount.breakEvenBelow}) on this basis` : ''}.`);
+    if (!w.headcount.moreHelps && w.headcount.nextParticipants != null) lines.push(`<b>More ${esc(t.many)} won’t help here.</b> Going from ${b.participants} to ${w.headcount.nextParticipants} changes firm money by ${money(w.headcount.nextChange)}.${w.margins.loses !== 'none' ? ' ' + marginWords(w.margins, t) : ''}${w.headcount.breakEvenBelow != null ? ` Firm money breaks even at a smaller number (${w.headcount.breakEvenBelow}) on this basis.` : ''}`);
     if (w.headcount.nextParticipants == null) lines.push(`${b.participants} is the most the capacity you entered allows, so a larger turnout isn’t possible as configured.`);
     if (w.venueMinimumApplied) lines.push(b.minimumParticipants > b.participants
       ? `The ${esc(t.venue)} bills at least ${b.minimumParticipants} ${esc(t.many)} even with ${b.participants}, so each one added up to ${b.minimumParticipants} adds money without adding to that bill.`
@@ -850,14 +865,17 @@ Report raw counts, never percentages applied to a whole school or community. Sur
 
     // req.prices holds only the boxes with a usable price (see whatIfRequest), each remembering its box (slot).
     const alts = w.prices.map((p, k) => ({ ...p, slot: req.slots[k] }));
-    const cols = [{ price: b.price, groupPrice: b.groupPrice, net: w.net, sponsorshipToBreakEven: w.sponsorship.toBreakEven, sponsorshipToGoal: w.sponsorship.toGoal, current: true }].concat(alts);
+    const cols = [{ price: b.price, groupPrice: b.groupPrice, net: w.net, sponsorshipToBreakEven: w.sponsorship.toBreakEven, sponsorshipToGoal: w.sponsorship.toGoal, current: true,
+      margins: w.margins, nextChange: w.headcount.nextChange, nextParticipants: w.headcount.nextParticipants, groupPriceSource: b.groupPriceIsDeal ? 'current-deal' : 'none' }].concat(alts);
+    const groupNote = (c) => ({ kept: ' <span class="muted">(your current deal, kept)</span>', none: ' <span class="muted">(no discount)</span>', typed: '', 'current-deal': '' }[c.groupPriceSource] || '');
+    const inherited = hasProductGrouping(o) ? `<p class="warn-callout">This product option still has group settings from another kind of event: groups of ${esc(b.groupSize)}${b.wholeGroupsOnly ? ' (whole groups only)' : ''}${b.groupShare > 0 ? `, ${Math.round(b.groupShare * 100)}% assumed to buy as a group at ${money(b.groupPrice)}` : ''}. These figures use them, exactly as your results do, and applying a price keeps them. If you sell single items, use <a href="#step-quote">Use individual-item sales</a> on the supplier step first.</p>` : '';
     const priceTable = alts.length ? `<div class="table-wrap" tabindex="0" role="region" aria-label="Price comparison"><table class="res wi-t"><thead><tr><th></th>${cols.map((c) => `<th>${c.current ? 'Current plan' : `Price ${'AB'[c.slot]}`}</th>`).join('')}</tr></thead><tbody>
         <tr><th>Price per ${esc(t.one)}</th>${cols.map((c) => `<td>${hm(c.price)}</td>`).join('')}</tr>
-        ${group ? `<tr><th>Price for a full ${esc(t.groupName)}</th>${cols.map((c) => `<td>${c.groupPrice == null ? '—' : hm(c.groupPrice)}${c.groupPriceDefaulted ? ' <span class="muted">(no discount)</span>' : ''}</td>`).join('')}</tr>` : ''}
+        ${group ? `<tr><th>Price for a full ${esc(gOf)}</th>${cols.map((c) => `<td>${money(c.groupPrice)}${groupNote(c)}</td>`).join('')}</tr>` : ''}
         <tr><th>Firm money at ${b.participants}</th>${cols.map((c) => `<td class="${c.net < 0 ? 'neg' : ''}">${hm(c.net)}</td>`).join('')}</tr>
         <tr><th>More firm sponsorship to break even</th>${cols.map((c) => `<td>${c.sponsorshipToBreakEven > 0 ? hm(c.sponsorshipToBreakEven) : 'none needed'}</td>`).join('')}</tr>
         ${target > 0 ? `<tr><th>More firm sponsorship to reach ${hm(target)}</th>${cols.map((c) => `<td>${c.sponsorshipToGoal > 0 ? hm(c.sponsorshipToGoal) : 'none needed'}</td>`).join('')}</tr>` : ''}
-        ${alts.some((c) => c.losesPerExtra) ? `<tr><th>Watch out</th>${cols.map((c) => `<td class="wrap">${!c.current && c.losesPerExtra ? `<b class="neg">Each extra ${esc(t.one)} loses money at this price</b>` : '—'}</td>`).join('')}</tr>` : ''}
+        ${cols.some((c) => c.margins.loses !== 'none') ? `<tr><th>Money from one more sale</th>${cols.map((c) => `<td class="wrap">${c.margins.loses === 'none' ? 'Covers its cost' : `<span class="neg">${marginWords(c.margins, t)}</span>`}${c.nextChange != null && c.margins.groupsUsed ? ` <span class="muted">From ${b.participants} to ${c.nextParticipants}, using your ${Math.round(c.margins.groupShare * 100)}% ${esc(gName)} guess: ${money(c.nextChange)}.</span>` : ''}</td>`).join('')}</tr>` : ''}
         <tr class="noprint"><th></th>${cols.map((c) => `<td>${c.current ? '' : `<button class="small" data-action="apply-price" data-k="${c.slot}">Use ${hm(c.price)} in my plan</button>`}</td>`).join('')}</tr>
       </tbody></table></div>` : '';
     const rows = state.options.length > 1 ? E.compareOptions(state) : [];
@@ -873,7 +891,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       </tbody></table></div>` : '';
     const sp = o.scenarioParticipants || {};
     const priceIn = (k) => `<div class="wi-price"><label class="f"><span>Price ${'AB'[k]} per ${esc(t.one)} ($)</span><input type="number" inputmode="decimal" step="any" min="0" data-whatif="prices.${k}" value="${esc(whatIf.prices[k])}"></label>
-      ${group ? `<label class="f"><span>Price ${'AB'[k]} for a full ${esc(t.groupName)} ($)</span><input type="number" inputmode="decimal" step="any" min="0" data-whatif="groups.${k}" value="${esc(whatIf.groups[k])}" placeholder="blank = ${esc(b.groupSize)} × price"></label>` : ''}</div>`;
+      ${group ? `<label class="f"><span>Price ${'AB'[k]} for a full ${esc(gOf)} ($)</span><input type="number" inputmode="decimal" step="any" min="0" data-whatif="groups.${k}" value="${esc(whatIf.groups[k])}" placeholder="${b.groupPriceIsDeal ? `blank = keep ${esc(money(b.groupPrice))}` : `blank = ${esc(b.groupSize)} × price`}"></label>` : ''}</div>`;
     return `<section class="panel whatif" aria-labelledby="wi-title">
       <h2 id="wi-title">What would need to change?</h2>
       <p class="hint">Hypothetical answers for one option at one number you choose, on firm money. <b>Nothing here changes your plan</b> unless you press a “Use … in my plan” button. These boxes aren’t saved; they clear when you reload.</p>
@@ -891,6 +909,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       <ul class="plain wi-notes">${lines.map((x) => `<li>${x}</li>`).join('')}</ul>
       <h3 class="sub">Compare prices you choose</h3>
       <p class="hint">Type one or two prices to see them at the same ${b.participants} ${esc(unitMany)}. This keeps the number the same: it does <b>not</b> know whether that many would still pay a higher price, or whether a lower price would bring more. ${b.paid > 0 && b.paidCash != null ? `The ${b.paid} who already paid keep the ${hm(b.paidCash)} received. ` : ''}Survey answers were for today’s offer, so a new price needs new answers.</p>
+      ${inherited}
       <div class="wi-prices">${priceIn(0)}${priceIn(1)}</div>
       ${priceTable}
       ${alts.length ? `<p class="hint">“Use … in my plan” asks you to confirm, then changes the price in your plan. Your low, likely and high numbers stay as they are: review them, because a different price can change who comes. Survey answers for the old price stop counting until you re-ask or confirm them.</p>` : ''}
@@ -1247,15 +1266,19 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       // price on step 4 apply (survey answers for the old offer go stale; paid tickets keep the money received).
       const o = state.options[whatIf.opt], k = +b.dataset.k, req = whatIfRequest(o), slot = req.slots.indexOf(k);
       if (!o || slot < 0) return;
-      const np = req.prices[slot], groupOn = !!T(o).groupName && (Number(o.groupSize) || 1) > 1;
+      // Apply exactly the fields the preview used (engine hypotheticalPrice), so the plan gives the previewed figure.
+      const preview = E.whatWouldChange(state, o, req), pr = preview.prices[slot];
+      if (!pr) return;
       if (!armed(b, `Change ${o.name}'s price in your plan? Click again`)) return;
       const before = state.options.map((x) => E.evidenceStatus(state, x).state), was = E.evidenceStatus(state, o).state;
-      o.price = np.price; if (groupOn) o.groupPrice = np.groupPrice;
+      o.price = pr.apply.price; o.groupPrice = pr.apply.groupPrice; delete o.foursomePrice;
       afterEdit(`options.${whatIf.opt}.price`, before);
       const now = E.evidenceStatus(state, o).state;
+      const after = E.whatWouldChange(state, o, { scenario: req.scenario, participants: req.participants }).net;
+      const gName = T(o).groupName || 'group', grouped = (Number(o.groupSize) || 1) > 1;
       whatIf = { ...freshWhatIf(), opt: whatIf.opt, at: whatIf.at, custom: whatIf.custom };
       touched = true; render();
-      say(`${o.name}: price changed to ${hm(np.price)}${groupOn ? ` (${np.groupPrice == null ? 'no group discount' : hm(np.groupPrice) + ' per ' + T(o).groupName})` : ''} in your plan. Your low, likely and high numbers were not changed: review them on step 9.`
+      say(`${o.name}: price changed to ${money(pr.apply.price)}${grouped ? ` (${pr.groupPriceSource === 'kept' ? `your ${money(pr.groupPrice)} ${gName} deal kept` : pr.groupPriceSource === 'typed' ? `${money(pr.groupPrice)} per ${gName}` : `no ${gName} discount`}; group settings unchanged)` : ''} in your plan. At ${pr.participants}, firm money is now ${money(after)}${after === pr.net ? ', as previewed' : ` (the preview said ${money(pr.net)}: please report this)`}. Your low, likely and high numbers were not changed: review them on step 9.`
         + (was === 'current' && now === 'stale' ? ' Survey answers were for the old price, so they no longer count until you re-ask or confirm them on step 8.' : ''));
       return;
     }

@@ -1,4 +1,10 @@
-# Review batch: "What would need to change?" and contract dates (Nov 14, 2026)
+# Review batch: "What would need to change?" and contract dates (Nov 14–15, 2026)
+
+> **Correction round (Nov 15):** two independently reproduced findings in `7678bc5` are fixed in the follow-up commit (row 82):
+> 1. Preview and apply now give identical money for every option, including product options with inherited grouping. Inherited grouping is shown, never dropped.
+> 2. Mixed single/group pricing is described per kind of sale, at the real marginal cost.
+>
+> The test totals below are updated. `TEST_RESULTS.txt` in the package names the exact corrected revision.
 
 **Status: local review batch. Not pushed, not merged, not deployed.** Production stays at `main` `87ff527` until William approves this batch and the deployment is verified.
 
@@ -27,10 +33,11 @@ Baseline checked before starting:
    - **Quote check:** changing a date or the quote reference unchecks "I have this quote in writing".
 3. **Board summary:** it now starts with "Prepared [local date] … not a record of board approval" and lists each option's contract items.
 4. **Save confidence:** Save & backup says "Last saved in this browser at [time]", but only after this page's own save of a change succeeded. After **Download backup file** it says the download was *started* and that the planner can't tell whether the file was kept.
-5. **Bug fixed:** the backup file name used the UTC date. At 11:30 pm on Nov 14 in Los Angeles it said `2026-11-15`; it now uses the local date.
-6. **Phones:** results tables were up to 1,044px wider than the screen and couldn't be reached by keyboard. They now take focus (arrow keys scroll them) and show "Scroll the table sideways…" on phones. On phones the pinned first column wraps instead of covering the screen.
+5. **Price preview = applied price** (row 82). Both use one engine function. A blank group-price box keeps an existing group deal; group size, whole groups and share are never changed. A product option that inherited grouping shows it, with a warning. The "one more sale" row says which kind of sale (single or full group) loses money, instead of a blanket "each extra one loses money".
+6. **Bug fixed:** the backup file name used the UTC date. At 11:30 pm on Nov 14 in Los Angeles it said `2026-11-15`; it now uses the local date.
+7. **Phones:** results tables were up to 1,044px wider than the screen and couldn't be reached by keyboard. They now take focus (arrow keys scroll them) and show "Scroll the table sideways…" on phones. On phones the pinned first column wraps instead of covering the screen.
 
-Decision log rows 77–81 give the reasons. `decide()`, the statuses, break-even and every existing financial rule are unchanged.
+Decision log rows 77–82 give the reasons. The statuses, break-even and every existing financial rule are unchanged. `decide()` changed only the wording of one reason (row 82).
 
 ## Schema and storage
 - New optional `option.contract` (see `DATA_MODEL_AND_PLAN.md`). `schemaVersion` stays **1**: the field is additive and optional.
@@ -41,12 +48,12 @@ Decision log rows 77–81 give the reasons. `decide()`, the statuses, break-even
 ## Tests
 | Suite | Baseline `87ff527` | This batch |
 |---|---|---|
-| Engine (`node --test test/*.test.js`) | 79/79 | **91/91** (12 new in `test/what-would-change.test.js`) |
+| Engine (`node --test test/*.test.js`) | 79/79 | **94/94** (15 new in `test/what-would-change.test.js`) |
 | `ui_smoke.py` | passed | passed |
 | `ui_review.py` | 13/13 | 13/13 |
 | `ui_clarity.py` | passed | passed |
 | `ui_journey.py` | 77/77 | 77/77 |
-| `ui_whatif.py` (new) | n/a | **80/80** |
+| `ui_whatif.py` (new) | n/a | **100/100** |
 
 **Fails before, passes after (new tests run against an untouched export of `87ff527`):**
 - Engine: 11 of the 12 new tests fail. The control-case test passes there too, because those figures were already right; it guards them.
@@ -108,7 +115,7 @@ It does **not** do registration, payments or event-day management, and shouldn't
 
 ## Independent verification (another reviewer)
 1. Check out the review commit (its full SHA is in `TEST_RESULTS.txt` in the package) and confirm its parent is `87ff527defae71f0ba2ecc496c28eba3d0e764ba`.
-2. `node --test test/*.test.js` should give 91 passed. Then run `node scripts/build.js && git diff --exit-code index.html`; there should be no diff.
+2. `node --test test/*.test.js` should give 94 passed. Then run `node scripts/build.js && git diff --exit-code index.html`; there should be no diff.
 3. `pip install playwright==1.56.0 && python -m playwright install chromium`, then run `test/ui_smoke.py`, `ui_review.py`, `ui_clarity.py`, `ui_whatif.py` and `ui_journey.py`. All should pass.
 4. **Manual check:** Save & backup → Open a backup file → `test/fixtures/golf-control-fictional.json` → Results → What would need to change:
    - pick the Conservative case: $1,640, the goal $3,360 short, 80 players;
