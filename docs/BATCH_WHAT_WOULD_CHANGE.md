@@ -4,6 +4,8 @@
 > 1. Preview and apply now give identical money for every option, including product options with inherited grouping. Inherited grouping is shown, never dropped.
 > 2. Mixed single/group pricing is described per kind of sale, at the real marginal cost.
 >
+> **Second correction (Nov 15, row 83):** group margins at minimum boundaries. A full group is now costed from the actual bill change n→n+group size, not one person's cost × group size. At 70 with a 72 minimum, a $100 foursome is correctly shown losing $40, not gaining $80.
+>
 > The test totals below are updated. `TEST_RESULTS.txt` in the package names the exact corrected revision.
 
 **Status: local review batch. Not pushed, not merged, not deployed.** Production stays at `main` `87ff527` until William approves this batch and the deployment is verified.
@@ -37,7 +39,7 @@ Baseline checked before starting:
 6. **Bug fixed:** the backup file name used the UTC date. At 11:30 pm on Nov 14 in Los Angeles it said `2026-11-15`; it now uses the local date.
 7. **Phones:** results tables were up to 1,044px wider than the screen and couldn't be reached by keyboard. They now take focus (arrow keys scroll them) and show "Scroll the table sideways…" on phones. On phones the pinned first column wraps instead of covering the screen.
 
-Decision log rows 77–82 give the reasons. The statuses, break-even and every existing financial rule are unchanged. `decide()` changed only the wording of one reason (row 82).
+Decision log rows 77–83 give the reasons. The statuses, break-even and every existing financial rule are unchanged. `decide()` changed only the wording of one reason (rows 82–83).
 
 ## Schema and storage
 - New optional `option.contract` (see `DATA_MODEL_AND_PLAN.md`). `schemaVersion` stays **1**: the field is additive and optional.
@@ -48,12 +50,12 @@ Decision log rows 77–82 give the reasons. The statuses, break-even and every e
 ## Tests
 | Suite | Baseline `87ff527` | This batch |
 |---|---|---|
-| Engine (`node --test test/*.test.js`) | 79/79 | **94/94** (15 new in `test/what-would-change.test.js`) |
+| Engine (`node --test test/*.test.js`) | 79/79 | **99/99** (20 new in `test/what-would-change.test.js`) |
 | `ui_smoke.py` | passed | passed |
 | `ui_review.py` | 13/13 | 13/13 |
 | `ui_clarity.py` | passed | passed |
 | `ui_journey.py` | 77/77 | 77/77 |
-| `ui_whatif.py` (new) | n/a | **100/100** |
+| `ui_whatif.py` (new) | n/a | **111/111** |
 
 **Fails before, passes after (new tests run against an untouched export of `87ff527`):**
 - Engine: 11 of the 12 new tests fail. The control-case test passes there too, because those figures were already right; it guards them.
@@ -115,7 +117,7 @@ It does **not** do registration, payments or event-day management, and shouldn't
 
 ## Independent verification (another reviewer)
 1. Check out the review commit (its full SHA is in `TEST_RESULTS.txt` in the package) and confirm its parent is `87ff527defae71f0ba2ecc496c28eba3d0e764ba`.
-2. `node --test test/*.test.js` should give 94 passed. Then run `node scripts/build.js && git diff --exit-code index.html`; there should be no diff.
+2. `node --test test/*.test.js` should give 99 passed. Then run `node scripts/build.js && git diff --exit-code index.html`; there should be no diff.
 3. `pip install playwright==1.56.0 && python -m playwright install chromium`, then run `test/ui_smoke.py`, `ui_review.py`, `ui_clarity.py`, `ui_whatif.py` and `ui_journey.py`. All should pass.
 4. **Manual check:** Save & backup → Open a backup file → `test/fixtures/golf-control-fictional.json` → Results → What would need to change:
    - pick the Conservative case: $1,640, the goal $3,360 short, 80 players;

@@ -125,7 +125,7 @@ with sync_playwright() as p:
         check('negative margin: says more items won\'t help and never offers a sales count', 'More items won’t help here' in wi and 'items sold would break even' not in wi, wi)
         check('negative margin: offers the firm sponsorship gap instead ($250)', '$250 more sponsorship' in wi)
         fill(pg, '[data-whatif="prices.0"]', 8)
-        check('negative margin: a typed price below cost is flagged with the cost', 'Each extra item loses money: $8 is below the $15 cost per item.' in pg.inner_text('.whatif table'), pg.inner_text('.whatif table'))
+        check('negative margin: a typed price below cost is flagged with the cost', 'Each extra item loses money: it adds $15 in costs ($15 more on the supplier bill + $0 per-person costs), more than its $8 price.' in pg.inner_text('.whatif table'), pg.inner_text('.whatif table'))
         check('negative margin: loss card still names −$500 at 100 items', '−$500' in pg.inner_text('article.sum .cards'))
         check('negative margin: no page errors', not errs, errs)
         ctx.close()
@@ -342,6 +342,45 @@ with sync_playwright() as p:
         check('mixed: no page errors', not errs, errs)
         ctx.close()
     section('mixed pricing wording', mixed)
+
+    # 9. Minimum boundaries (row 83): a full group is costed from the actual bill change n -> n+4, a single from n -> n+1.
+    #    Each case is the golf control with whole groups off, so a group can start part-way to the minimum.
+    def boundary():
+        def case(name, change, n, expect_group, expect_detail):
+            ctx, pg, errs = new(); pg.goto(URL)
+            plan = json.loads(CONTROL); o = plan['options'][0]; o['wholeGroupsOnly'] = False; change(plan, o)
+            open_file(pg, json.dumps(plan)); pg.goto(URL + '#results'); pg.wait_for_timeout(200)
+            pg.select_option('[data-whatif="at"]', 'custom'); pg.wait_for_timeout(120); fill(pg, '[data-whatif="custom"]', n)
+            fill(pg, '[data-whatif="prices.0"]', 125); fill(pg, '[data-whatif="groups.0"]', 100)
+            txt = cell(pg, 'Money from one more sale', 1) or ''
+            check(f'boundary {name}: warning names the real group loss', expect_group in txt and expect_detail in txt and 'single player at $125 still covers its cost' in txt, txt)
+            prev = cell(pg, f'Firm money at {n}', 1)
+            pg.click('[data-action="apply-price"][data-k="0"]'); pg.click('[data-action="apply-price"][data-k="0"]'); pg.wait_for_timeout(250)
+            check(f'boundary {name}: preview equals result after applying', prev == card(pg) and 'as previewed' in pg.inner_text('#status'), (prev, card(pg)))
+            check(f'boundary {name}: no page errors', not errs, errs)
+            if shots: pg.screenshot(path=f'{shots}/boundary-{name}.png', full_page=True)
+            ctx.close()
+        def headcount(plan, o): pass  # control: 72-player minimum at $60
+        def spend(plan, o):
+            o['venueQuote'].update(minimumParticipants=0, minimumSpend=3000)
+            o['deposit'] = {'amount': 0, 'creditedTowardBill': True, 'refundable': True}
+        def floor(plan, o):
+            o['venueQuote']['minimumParticipants'] = 0
+            plan['evidence']['paidRegistrations'] = {'golf': 0}; plan['evidence']['paidCashReceived'] = {}
+        case('72-player minimum at 70', headcount, 70, 'A full foursome of 4 at $100 loses $40', '$120 more on the course bill + $20 per-person costs')
+        case('$3,000 minimum bill at 48', spend, 48, 'A full foursome of 4 at $100 loses $40', '$120 more on the course bill + $20 per-person costs')
+        case('$1,000 deposit floor at 15', floor, 15, 'A full foursome of 4 at $100 loses $60', '$140 more on the course bill + $20 per-person costs')
+        # inside the minimum nothing is called a loss; fully past it the group loses $160
+        ctx, pg, errs = new(); pg.goto(URL)
+        plan = json.loads(CONTROL); plan['options'][0]['wholeGroupsOnly'] = False; open_file(pg, json.dumps(plan))
+        pg.goto(URL + '#results'); pg.wait_for_timeout(200)
+        pg.select_option('[data-whatif="at"]', 'custom'); pg.wait_for_timeout(120); fill(pg, '[data-whatif="custom"]', 60)
+        fill(pg, '[data-whatif="prices.0"]', 125); fill(pg, '[data-whatif="groups.0"]', 100)
+        check('boundary inside the minimum (60 -> 64): no loss claimed', 'loses' not in pg.inner_text('.whatif table'), cell(pg, 'Money from one more sale', 1))
+        fill(pg, '[data-whatif="custom"]', 76)
+        check('boundary past the minimum (76 -> 80): foursome loses $160', 'A full foursome of 4 at $100 loses $160' in (cell(pg, 'Money from one more sale', 1) or ''), cell(pg, 'Money from one more sale', 1))
+        ctx.close()
+    section('minimum boundaries', boundary)
     b.close()
 
 for n, ok, det in results: print(('PASS ' if ok else 'FAIL ') + n + ('' if ok or not det else f'  [{det}]'))

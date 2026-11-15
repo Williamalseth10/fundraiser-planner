@@ -435,9 +435,12 @@
       // Why it dips, from the margins just before the dip: singles and full groups are judged separately (row 82).
       const m = pricingMargins(option, Math.max(0, be.dipsAt - participantStep(option)));
       const one = option.kind === 'product' ? 'item' : 'person';
-      const why = m.loses === 'all' ? `: each extra ${one} costs more than they pay (${m.singlesUsed ? `price ${usd(m.price)}` : ''}${m.singlesUsed && m.groupsUsed ? ', ' : ''}${m.groupsUsed ? `${usd(m.groupPrice)} per group of ${m.groupSize}` : ''}, cost ${usd(m.costPerUnit)} each)`
-        : m.loses === 'group' ? `: a full group of ${m.groupSize} at ${usd(m.groupPrice)} costs more than it pays (cost ${usd(m.costPerUnit)} each), while a single ${one} at ${usd(m.price)} still covers its cost`
-          : m.loses === 'single' ? `: a single ${one} at ${usd(m.price)} costs more than it pays (cost ${usd(m.costPerUnit)}), while a full group of ${m.groupSize} at ${usd(m.groupPrice)} still covers its cost`
+      // Each kind's real added cost (row 83): a single adds singleCost, a full group adds groupCost.
+      const why = m.loses === 'all' ? (m.groupsUsed
+          ? `: every extra sale costs more than it pays (${m.singlesUsed ? `a single ${one} at ${usd(m.price)} adds ${usd(m.singleCost)} in costs; ` : ''}a full group of ${m.groupSize} at ${usd(m.groupPrice)} adds ${usd(m.groupCost)})`
+          : `: each extra ${one} costs more than they pay (price ${usd(m.price)}, cost ${usd(m.singleCost)} each)`)
+        : m.loses === 'group' ? `: a full group of ${m.groupSize} at ${usd(m.groupPrice)} costs more than it pays (it adds ${usd(m.groupCost)} in costs), while a single ${one} at ${usd(m.price)} still covers its cost`
+          : m.loses === 'single' ? `: a single ${one} at ${usd(m.price)} costs more than it pays (it adds ${usd(m.singleCost)} in costs), while a full group of ${m.groupSize} at ${usd(m.groupPrice)} still covers its cost`
             : ', because of group pricing or a minimum';
       reasons.push(`Costs are covered at ${be.participants}, but money left falls below zero again at ${be.dipsAt}${why}. Check the chart before relying on a single break-even number.`);
     } else if (cons.net < 0) {
@@ -511,33 +514,41 @@
   }
 
   /**
-   * What one more sale brings in against what it costs, separately for a single ticket and for a full group, at
-   * participant count n. With mixed pricing one kind can lose money while the other covers its cost, so the answer is
-   * 'all' only when every kind of sale that can happen loses money:
-   *   none | single (singles lose, groups cover) | group (groups lose, singles cover) | all
-   * The venue's share of the cost is what the venue bill actually goes up by for the next sale (venueBillCents), so a
-   * minimum headcount, a minimum bill total or a non-refundable deposit floor that already covers the next one is
-   * respected: until that minimum is used up, an extra one costs only the other per-person costs.
+   * What one more sale brings in against what it costs, at participant count n, measured separately for
+   *   - one single ticket:  venue bill at n+1 minus venue bill at n, plus one set of per-person costs;
+   *   - one full group:     venue bill at n+groupSize minus venue bill at n, plus groupSize sets of per-person costs.
+   * Each uses the actual venue-bill difference (venueBillCents), so a minimum headcount, a minimum bill total or a
+   * non-refundable deposit floor is respected exactly, including when the sale crosses the minimum part-way
+   * (row 83: at 70 with a 72 minimum, a foursome adds 2 players' worth of course charge, not 0 and not 4).
+   * With mixed pricing one kind can lose money while the other covers its cost, so the answer is 'all' only when every
+   * kind of sale that can happen loses money:   none | single | group | all
    */
   function pricingMargins(option, n) {
     const size = Math.max(1, int(option.groupSize) || 1);
     const share = Math.min(1, nonNeg(option.groupShare !== undefined ? option.groupShare : option.foursomeShare));
     const other = (option.perParticipantCosts || []).reduce((s, l) => s + ci(l.amount), 0);
     const minimum = int((option.venueQuote || {}).minimumParticipants);
-    const step = participantStep(option), at = int(n);
-    const venueNext = Math.round((venueBillCents(option, at + step).bill - venueBillCents(option, at).bill) / step);
-    const belowMinimum = venueNext < ci((option.venueQuote || {}).perParticipant);
-    const cost = venueNext + other;
-    const single = ci(option.price) - cost;
+    const perHeadCharge = ci((option.venueQuote || {}).perParticipant);
+    const at = int(n);
+    const billAt = venueBillCents(option, at).bill;
+    const singleVenue = venueBillCents(option, at + 1).bill - billAt;
+    const singleCost = singleVenue + other;
+    const single = ci(option.price) - singleCost;
     const groupsUsed = size > 1 && share > 0;
-    const group = size > 1 ? groupPriceCents(option) - cost * size : null;
+    const groupVenue = size > 1 ? venueBillCents(option, at + size).bill - billAt : null;
+    const groupCost = size > 1 ? groupVenue + other * size : null;
+    const group = size > 1 ? groupPriceCents(option) - groupCost : null;
     // With every buyer in a group and whole groups only, nobody ever pays the single price.
     const singlesUsed = !(groupsUsed && share >= 1 && option.wholeGroupsOnly);
     const singleLoses = singlesUsed && single < 0, groupLoses = groupsUsed && group < 0;
     const loses = (singleLoses || !singlesUsed) && (groupLoses || !groupsUsed) && (singleLoses || groupLoses) ? 'all' : singleLoses ? 'single' : groupLoses ? 'group' : 'none';
     return {
-      costPerUnit: d(cost), belowMinimum, minimum, price: d(ci(option.price)), singleMargin: d(single),
-      groupSize: size, groupShare: share, groupsUsed, singlesUsed, groupPrice: size > 1 ? d(groupPriceCents(option)) : null, groupMargin: group == null ? null : d(group),
+      price: d(ci(option.price)), minimum, otherPerPerson: d(other),
+      singleCost: d(singleCost), singleVenue: d(singleVenue), singleMargin: d(single), singleUnderMinimum: singleVenue < perHeadCharge,
+      groupSize: size, groupShare: share, groupsUsed, singlesUsed, groupPrice: size > 1 ? d(groupPriceCents(option)) : null,
+      groupCost: groupCost == null ? null : d(groupCost), groupVenue: groupVenue == null ? null : d(groupVenue),
+      groupMargin: group == null ? null : d(group), groupUnderMinimum: size > 1 && groupVenue < perHeadCharge * size,
+      costPerUnit: d(singleCost), belowMinimum: singleVenue < perHeadCharge, // older field names: the single-ticket figures
       loses,
     };
   }

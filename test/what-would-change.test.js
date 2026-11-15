@@ -151,17 +151,74 @@ test('below a venue minimum an extra player costs only the other per-person cost
   const s = control(), o = s.options[0];
   const m = E.pricingMargins(o, 48);            // the 72-player course minimum is already billed
   assert.equal(m.belowMinimum, true);
-  assert.equal(m.costPerUnit, 5);
-  assert.equal(E.pricingMargins(o, 72).costPerUnit, 65);
-  // a minimum BILL TOTAL works the same way: $3,000 covers 50 players at $60 (players come in foursomes)
-  const spend = { ...o, venueQuote: { ...o.venueQuote, minimumParticipants: 0, minimumSpend: 3000 }, deposit: { amount: 0, creditedTowardBill: true, refundable: true } };
-  assert.equal(E.pricingMargins(spend, 44).costPerUnit, 5);   // 44 -> 48: still inside the $3,000
-  assert.equal(E.pricingMargins(spend, 48).costPerUnit, 35);  // 48 -> 52 crosses it: bill $3,000 -> $3,120, $30 each + $5
-  assert.equal(E.pricingMargins(spend, 52).costPerUnit, 65);
-  // and a non-refundable credited deposit that sets a floor on the bill: $1,000 covers 16 players at $60
-  const floor = { ...o, venueQuote: { ...o.venueQuote, minimumParticipants: 0 } };
-  assert.equal(E.pricingMargins(floor, 8).costPerUnit, 5);
-  assert.equal(E.pricingMargins(floor, 20).costPerUnit, 65);
+  assert.equal(m.singleCost, 5);
+  assert.equal(E.pricingMargins(o, 72).singleCost, 65);
+});
+
+// Row 83: singles and full groups are each costed from the ACTUAL venue-bill difference (n -> n+1, n -> n+groupSize).
+const boundaryOption = (venue, deposit) => ({
+  id: 'b', name: 'Boundary (fictional)', kind: 'golf_shotgun', capacity: 200, groupSize: 4, wholeGroupsOnly: false,
+  price: 125, groupPrice: 100, groupShare: 0.5,
+  venueQuote: { flatFee: 0, perParticipant: 60, minimumParticipants: 0, minimumSpend: 0, ...venue },
+  deposit: deposit || { amount: 0, creditedTowardBill: true, refundable: true },
+  perParticipantCosts: [{ id: 'gift', label: 'Gift', amount: 5 }], fixedCosts: [],
+});
+const margins = (o, n) => { const m = E.pricingMargins(o, n); return [m.singleCost, m.groupCost, m.singleMargin, m.groupMargin, m.loses]; };
+
+test('reproduction: at 70 with a 72-player minimum, a $100 foursome loses $40 (not +$80)', () => {
+  const o = boundaryOption({ minimumParticipants: 72 });
+  const m = E.pricingMargins(o, 70);
+  assert.equal(m.groupVenue, 120);    // 70 -> 74: bill goes from 72 x $60 to 74 x $60
+  assert.equal(m.groupCost, 140);     // + 4 x $5 gifts
+  assert.equal(m.groupMargin, -40);
+  assert.equal(m.singleVenue, 0);     // 70 -> 71 is still inside the minimum
+  assert.equal(m.singleCost, 5);
+  assert.equal(m.singleMargin, 120);
+  assert.equal(m.loses, 'group');
+});
+
+test('headcount minimum: singles and groups at, inside and across the boundary', () => {
+  const o = boundaryOption({ minimumParticipants: 72 });
+  //                      single cost, group cost, single margin, group margin, loses
+  assert.deepEqual(margins(o, 60), [5, 20, 120, 80, 'none']);      // 60 -> 64: all inside the minimum
+  assert.deepEqual(margins(o, 68), [5, 20, 120, 80, 'none']);      // 68 -> 72: lands exactly on it
+  assert.deepEqual(margins(o, 69), [5, 80, 120, 20, 'none']);      // 69 -> 73: 1 player past it
+  assert.deepEqual(margins(o, 70), [5, 140, 120, -40, 'group']);   // 2 past
+  assert.deepEqual(margins(o, 71), [5, 200, 120, -100, 'group']);  // 3 past; the single still lands on 72
+  assert.deepEqual(margins(o, 72), [65, 260, 60, -160, 'group']);  // fully past
+  // the same option with whole groups only: a single still measured at n+1, a group at n+4
+  assert.deepEqual(margins({ ...o, wholeGroupsOnly: true }, 68), [5, 20, 120, 80, 'none']);
+});
+
+test('minimum bill total: $3,000 at $60 covers 50 players; singles and groups measured separately', () => {
+  const o = boundaryOption({ minimumSpend: 3000 });
+  assert.deepEqual(margins(o, 44), [5, 20, 120, 80, 'none']);      // 44 -> 48: bill stays $3,000
+  assert.deepEqual(margins(o, 48), [5, 140, 120, -40, 'group']);   // 48 -> 52: $3,000 -> $3,120
+  assert.deepEqual(margins(o, 49), [5, 200, 120, -100, 'group']);  // 49 -> 50 single stays inside; 49 -> 53 group: +$180
+  assert.deepEqual(margins(o, 50), [65, 260, 60, -160, 'group']);
+});
+
+test('non-refundable credited deposit floor: $1,000 at $60 covers 16 players', () => {
+  const o = boundaryOption({}, { amount: 1000, creditedTowardBill: true, refundable: false });
+  assert.deepEqual(margins(o, 12), [5, 20, 120, 80, 'none']);      // 12 -> 16: bill stays $1,000
+  assert.deepEqual(margins(o, 14), [5, 100, 120, 0, 'none']);      // 14 -> 18: $1,000 -> $1,080; breaks exactly even
+  assert.deepEqual(margins(o, 15), [5, 160, 120, -60, 'group']);   // 15 -> 19: +$140
+  assert.deepEqual(margins(o, 16), [25, 220, 100, -120, 'group']);  // 16 -> 17: +$20 on the bill; 16 -> 20: +$200
+  assert.deepEqual(margins(o, 17), [65, 260, 60, -160, 'group']);
+  // a refundable or separate deposit sets no floor
+  assert.deepEqual(margins(boundaryOption({}, { amount: 1000, creditedTowardBill: true, refundable: true }), 12), [65, 260, 60, -160, 'group']);
+});
+
+test('the what-if price comparison uses the same per-kind margins, and preview still equals apply at a boundary', () => {
+  const s = control(), o = s.options[0];
+  Object.assign(o, { wholeGroupsOnly: false });
+  const w = E.whatWouldChange(s, o, { participants: 70, prices: [{ price: 125, groupPrice: 100 }] });
+  const [p] = w.prices;
+  assert.equal(p.margins.groupMargin, -40);
+  assert.equal(p.margins.loses, 'group');
+  const applied = { ...clone(o), price: p.apply.price, groupPrice: p.apply.groupPrice };
+  assert.equal(E.whatWouldChange({ ...s, options: [applied] }, applied, { participants: 70 }).net, p.net);
+  assert.equal(E.whatWouldChange({ ...s, options: [applied] }, applied, { participants: 70 }).margins.groupMargin, -40);
 });
 
 test('the dip reason in decide() names which kind of sale loses money, never a blanket rule', () => {
@@ -182,7 +239,7 @@ test('the dip reason in decide() names which kind of sale loses money, never a b
   const dip = d.reasons.find((r) => /falls below zero again/.test(r));
   assert.ok(dip, d.reasons.join(' | '));
   assert.doesNotMatch(dip, /each extra person costs more than they pay/);
-  assert.match(dip, /a full group of 4 at \$100\.00 costs more than it pays \(cost \$65\.00 each\), while a single person at \$125\.00 still covers its cost/);
+  assert.match(dip, /a full group of 4 at \$100\.00 costs more than it pays \(it adds \$260\.00 in costs\), while a single person at \$125\.00 still covers its cost/);
   // when every buyer is in a whole group there are no singles: then it is "every extra sale", stated with the group price
   const all = E.pricingMargins({ ...o, groupShare: 1 }, 40);
   assert.equal(all.singlesUsed, false);

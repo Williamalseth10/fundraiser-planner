@@ -812,15 +812,18 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   // One more sale, in words: singles and full groups are described separately, so mixed pricing is never summed up as
   // "each extra one loses money" when only one kind does.
   function marginWords(m, t) {
+    // Each kind of sale is costed on its own (row 83): what the venue bill actually goes up by, plus per-person costs.
     const g = `full ${t.groupName || 'group'} of ${m.groupSize}`;
-    const cost = `${money(m.costPerUnit)} cost per ${t.one}${m.belowMinimum ? ` while the ${t.venue}’s minimum still covers the next one` : ''}`;
+    const extra = (venue, people) => `${money(venue)} more on the ${t.venue} bill + ${money(Math.round(m.otherPerPerson * people * 100) / 100)} per-person costs`;
+    const sCost = `${money(m.singleCost)} in costs (${extra(m.singleVenue, 1)}${m.singleUnderMinimum ? `; the ${t.venue}’s minimum already covers ${m.singleVenue > 0 ? 'part of ' : ''}its charge` : ''})`;
+    const gCost = m.groupsUsed ? `${money(m.groupCost)} in costs (${extra(m.groupVenue, m.groupSize)}${m.groupUnderMinimum ? `; the ${t.venue}’s minimum covers only ${m.groupVenue > 0 ? 'part' : 'all'} of it` : ''})` : '';
     if (m.loses === 'all') return m.groupsUsed && !m.singlesUsed
-      ? `Every extra sale loses money: everyone buys as a ${g} at ${money(m.groupPrice)}, which is below ${m.groupSize} × the ${cost}.`
+      ? `Every extra sale loses money: everyone buys as a ${g} at ${money(m.groupPrice)}, which adds ${gCost}.`
       : m.groupsUsed
-      ? `Every extra sale loses money: a single ${t.one} at ${money(m.price)} and a ${g} at ${money(m.groupPrice)} are both below the ${cost}.`
-      : `Each extra ${t.one} loses money: ${money(m.price)} is below the ${cost}.`;
-    if (m.loses === 'group') return `A ${g} at ${money(m.groupPrice)} loses ${money(-m.groupMargin)} (the ${cost} is more than the ${t.groupName || 'group'} price per ${t.one}). A single ${t.one} at ${money(m.price)} still covers its cost (+${money(m.singleMargin)}).`;
-    if (m.loses === 'single') return `A single ${t.one} at ${money(m.price)} loses ${money(-m.singleMargin)} against the ${cost}. A ${g} at ${money(m.groupPrice)} still covers its cost (+${money(m.groupMargin)}).`;
+      ? `Every extra sale loses money: a single ${t.one} at ${money(m.price)} adds ${sCost}, and a ${g} at ${money(m.groupPrice)} adds ${gCost}.`
+      : `Each extra ${t.one} loses money: it adds ${sCost}, more than its ${money(m.price)} price.`;
+    if (m.loses === 'group') return `A ${g} at ${money(m.groupPrice)} loses ${money(-m.groupMargin)}: it adds ${gCost}. A single ${t.one} at ${money(m.price)} still covers its cost (+${money(m.singleMargin)}).`;
+    if (m.loses === 'single') return `A single ${t.one} at ${money(m.price)} loses ${money(-m.singleMargin)}: it adds ${sCost}. A ${g} at ${money(m.groupPrice)} still covers its cost (+${money(m.groupMargin)}).`;
     return '';
   }
   function renderWhatIf() {
@@ -875,7 +878,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <tr><th>Firm money at ${b.participants}</th>${cols.map((c) => `<td class="${c.net < 0 ? 'neg' : ''}">${hm(c.net)}</td>`).join('')}</tr>
         <tr><th>More firm sponsorship to break even</th>${cols.map((c) => `<td>${c.sponsorshipToBreakEven > 0 ? hm(c.sponsorshipToBreakEven) : 'none needed'}</td>`).join('')}</tr>
         ${target > 0 ? `<tr><th>More firm sponsorship to reach ${hm(target)}</th>${cols.map((c) => `<td>${c.sponsorshipToGoal > 0 ? hm(c.sponsorshipToGoal) : 'none needed'}</td>`).join('')}</tr>` : ''}
-        ${cols.some((c) => c.margins.loses !== 'none') ? `<tr><th>Money from one more sale</th>${cols.map((c) => `<td class="wrap">${c.margins.loses === 'none' ? 'Covers its cost' : `<span class="neg">${marginWords(c.margins, t)}</span>`}${c.nextChange != null && c.margins.groupsUsed ? ` <span class="muted">From ${b.participants} to ${c.nextParticipants}, using your ${Math.round(c.margins.groupShare * 100)}% ${esc(gName)} guess: ${money(c.nextChange)}.</span>` : ''}</td>`).join('')}</tr>` : ''}
+        ${cols.some((c) => c.margins.loses !== 'none') ? `<tr><th>Money from one more sale</th>${cols.map((c) => `<td class="wrap">${c.margins.loses === 'none' ? 'Covers its cost' : `<span class="neg">${marginWords(c.margins, t)}</span>`}${c.nextChange != null && c.margins.groupsUsed && c.nextParticipants - b.participants === b.groupSize ? ` <span class="muted">From ${b.participants} to ${c.nextParticipants}, using your ${Math.round(c.margins.groupShare * 100)}% ${esc(gName)} guess: ${money(c.nextChange)}.</span>` : ''}</td>`).join('')}</tr>` : ''}
         <tr class="noprint"><th></th>${cols.map((c) => `<td>${c.current ? '' : `<button class="small" data-action="apply-price" data-k="${c.slot}">Use ${hm(c.price)} in my plan</button>`}</td>`).join('')}</tr>
       </tbody></table></div>` : '';
     const rows = state.options.length > 1 ? E.compareOptions(state) : [];
