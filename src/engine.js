@@ -853,6 +853,107 @@
     return out;
   }
 
+  // ---------- Batch 2: interest by offer, capacity shortcuts, same-turnout comparison (row 87) ----------
+  // All of these only read the plan and reuse project(): no new money rules, no forecasts, no probabilities.
+
+  /**
+   * One option's evidence, stage by stage, never added together: who was sent the survey and who answered (the whole
+   * survey), interest in this option (named "yes", anonymous "yes", "maybe"), paid sign-ups and money actually received.
+   * Interest counts belong to the offer they were collected for: named "yes" counts toward the decision only when the
+   * offer is current. Past rounds (kept when an offer changed) are listed, never summed with current answers.
+   */
+  function interestFunnel(state, option) {
+    const ev = (state && state.evidence) || {};
+    const n = (k) => { const v = (ev[k] || {})[option.id]; return knownNum(v) ? Math.floor(Number(v)) : 0; };
+    const cash = (ev.paidCashReceived || {})[option.id];
+    const st = evidenceStatus(state, option);
+    const rounds = Array.isArray((ev.offerHistory || {})[option.id]) ? ev.offerHistory[option.id].filter((r) => r && typeof r === 'object') : [];
+    const named = n('namedHighIntent');
+    return {
+      contacted: knownNum(ev.surveyContacted) ? Math.floor(Number(ev.surveyContacted)) : null,
+      responses: knownNum(ev.surveyResponses) ? Math.floor(Number(ev.surveyResponses)) : null,
+      named, anonymousYes: n('surveyDefinitelyAtPrice'), maybe: n('surveyProbablyAtPrice'),
+      namedCounted: st.state === 'current' ? named : 0,
+      paid: n('paidRegistrations'), cashReceived: cash == null || cash === '' || !knownNum(cash) ? null : d(ci(cash)),
+      offerState: st.state, offerChanged: st.changed, terms: st.recorded || null,
+      pastRounds: rounds.map((r) => ({
+        id: r.id, archivedOn: typeof r.archivedOn === 'string' ? r.archivedOn : null, terms: r.terms && typeof r.terms === 'object' ? r.terms : null,
+        named: knownNum(r.named) ? Math.floor(Number(r.named)) : 0, anonymousYes: knownNum(r.definitely) ? Math.floor(Number(r.definitely)) : 0,
+        maybe: knownNum(r.probably) ? Math.floor(Number(r.probably)) : 0,
+        responses: knownNum(r.surveyResponses) ? Math.floor(Number(r.surveyResponses)) : null, contacted: knownNum(r.surveyContacted) ? Math.floor(Number(r.surveyContacted)) : null,
+      })),
+    };
+  }
+
+  /**
+   * 50%, 75% and 100% of the capacity entered, as previews for one scenario. Each is rounded DOWN to whole groups when
+   * required and never above capacity (normalizeParticipants), then run through project() with that scenario's own
+   * assumptions, and through the firm-money basis. Venue minimums, deposit floors, group pricing and money already
+   * received are handled by project(). A shortcut below the number already paid is marked and must not be applied.
+   * These are arithmetic on capacity, not evidence that this many will come.
+   */
+  function capacityShortcuts(state, option, scenarioKey) {
+    const k = SCENARIO_KEYS.includes(scenarioKey) ? scenarioKey : 'middle';
+    const cap = int(option.capacity), max = maxFeasible(option);
+    if (!max) return { available: false, scenario: k, rows: [] };
+    const ctx = scenarioContext(state, option, k), firm = firmContext(state, option);
+    const paid = int(ctx.paidRegistrations);
+    const current = int((option.scenarioParticipants || {})[k]);
+    const rows = [50, 75, 100].map((pct) => {
+      const requested = Math.floor((cap * pct) / 100);
+      const norm = normalizeParticipants(option, requested);
+      const nn = norm.participants;
+      const p = project(option, nn, ctx), f = project(option, nn, firm);
+      return {
+        pct, requested, participants: nn, flags: norm.flags,
+        revenue: p.revenue.total, expenses: p.expenses.total, net: p.net, firmNet: f.net,
+        cashNeeded: p.upfront.required, cashInHand: p.upfront.cashInHand, cashShort: p.upfront.gap,
+        venueMinimumApplied: p.expenses.venueMinimumApplied, belowPaid: nn < paid, isCurrent: nn === current,
+      };
+    });
+    return { available: true, scenario: k, paid, capacity: cap, maxFeasible: max, current, rows };
+  }
+
+  /**
+   * Two options (for example tee times and a shotgun start) at the SAME requested number of participants, on the
+   * firm-money basis. Each is rounded to its own whole groups. Reports the extra documented cost of the costlier one,
+   * the extra firm sponsorship that would make its firm net match the other's at that number, and the smallest number
+   * of ADDITIONAL paying participants on the costlier option that would do it (an exact scan of its own chart, so group
+   * pricing, minimums and deposit floors are handled), or that it can't be recovered within capacity.
+   * It assumes nothing about one format attracting more people or a higher price: that would be the organizer's
+   * assumption, kept out of these numbers.
+   */
+  function compareAtSameTurnout(state, a, b, requested) {
+    const side = (o) => {
+      const ctx = firmContext(state, o), norm = normalizeParticipants(o, requested), p = project(o, norm.participants, ctx);
+      return {
+        o, ctx, id: o.id, name: o.name, requested: norm.requested, participants: norm.participants, flags: norm.flags,
+        revenue: p.revenue.total, expenses: p.expenses.total, net: p.net,
+        costs: { venue: p.expenses.venue, perParticipant: p.expenses.perParticipant, fixed: p.expenses.fixed, separateDepositFee: p.expenses.separateDepositFee, contingency: p.expenses.contingency },
+        venueMinimumApplied: p.expenses.venueMinimumApplied, cashNeeded: p.upfront.required, quoteVerified: !!o.quoteVerified, costsVerified: !!o.costsVerified,
+      };
+    };
+    const A = side(a), B = side(b);
+    const strip = (x) => { const { o, ctx, ...rest } = x; return rest; };
+    const ea = c(A.expenses), eb = c(B.expenses);
+    if (ea === eb) return { a: strip(A), b: strip(B), costlierId: null, extraCost: 0, sponsorshipToCover: 0, playersToCover: 0, recoverable: true, sameCount: A.participants === B.participants };
+    const [X, Y] = ea < eb ? [A, B] : [B, A]; // X costs less; Y costs more
+    const target = c(X.net), gap = target - c(Y.net);
+    let players = 0, recoverable = true;
+    if (gap > 0) {
+      const above = netCurve(Y.o, Y.ctx).filter((pt) => pt.participants > Y.participants);
+      const hit = above.find((pt) => c(pt.net) >= target);
+      if (hit) players = hit.participants - Y.participants; else { players = null; recoverable = false; }
+    }
+    return {
+      a: strip(A), b: strip(B), costlierId: Y.id, cheaperId: X.id,
+      extraCost: d(Math.abs(eb - ea)), extraRevenue: d(c(Y.revenue) - c(X.revenue)),
+      netGap: d(Math.max(0, gap)), sponsorshipToCover: d(Math.max(0, gap)),
+      playersToCover: players, recoverable, maxFeasibleCostlier: maxFeasible(Y.o),
+      sameCount: A.participants === B.participants,
+    };
+  }
+
   const STATUS_LABELS = {
     not_enough_evidence: 'Not enough evidence to decide yet',
     not_viable_as_configured: 'Not viable as currently configured',
@@ -867,6 +968,7 @@
     registrationCents, worstCase, cancellationExposure, roundHeadline,
     project, participantsNeeded, netCurve, sensitivity, scenarioContext, firmContext, decide, offerTerms, evidenceStatus,
     whatWouldChange, compareOptions, hypotheticalPrice, pricingMargins,
+    interestFunnel, capacityShortcuts, compareAtSameTurnout,
     audienceSummary, comparableSummary, researchProblems, researchKind, researchVerification, RESEARCH_UNITS, AUDIENCE_CATEGORIES, PROVENANCES, VERIFICATIONS, contractChecklist, isCalendarDate, daysBetween, CONTRACT_DATES, CONTRACT_TEXT,
   };
 
