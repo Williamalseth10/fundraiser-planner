@@ -49,9 +49,25 @@ EventOption {
                quoteSource, cancellationNotes, weatherNotes: short text }   (optional, row 78; never used in the math)
 }
 Sponsorship { id, label, amount, status: collected|committed|hoped, type: cash|inKind, replacesCostId?, optionId? }
+research? {                                   (optional, row 84; never read by any calculation)
+  audiences:   [{ id, name, provenance?: observation|estimate|fictional, verification?: unchecked|checked|conflicting,
+                  category: parents|alumni|businesses|golfers|community|staff|other,
+                  unit: people|households|businesses|organizations|other, reach|null, contacted|null, responded|null,
+                  source, sourceDate, overlapsWith:[audienceId], optionIds:[optionId], notes }],
+  comparables: [{ id, name, provenance?, verification?, eventType, location, eventDate, sourceUrl, sourceRef, checkedDate,
+                  sourceQuality: official|secondhand|ai|personal|unknown, format, included, pricingTier: early|regular|single|unknown,
+                  priceSingle|null, priceGroup|null, groupSize|null, groupPriceBasis?: advertised|derived|unknown,
+                  feesPerPerson|null, feesNote, advertisedCapacity?|null (a limit, not attendance),
+                  resultAttendance|null (reported participation, not paid registrations), resultVerified (reported in writing),
+                  resultNote, comparability: close|partial|not|unknown, differences (differences and limitations), optionIds:[optionId] }],
+  links:       [{ id, optionId, assumption: price|groupPrice|capacity|conservative|middle|optimistic|sponsorship|costs|other,
+                  researchIds:[audienceId|comparableId], note }]
+}
 ```
 
 **Schema note (row 78):** `contract` is optional and additive, so `schemaVersion` stays 1 and older plans and files load unchanged. Dates are calendar text (`YYYY-MM-DD`), compared as calendar days against the local date. A file with an impossible date or non-text notes is refused whole and changes nothing. The "What would need to change?" boxes and the save-time line are screen-only: they are never written to the plan or to storage.
+
+**Research schema note (rows 84-85):** provenance and verification are explicit; a missing provenance reads as "not recorded (older record)" and a missing verification as "not checked", and neither is ever inferred from a source or URL. In a real plan, fictional records are listed but left out of every summary. There is no combined price range: similar events are listed side by side. `research` is optional and additive, so `schemaVersion` stays 1, older plans and files load unchanged, and nothing is migrated. Every known research field is type-checked on import; a bad record refuses the whole file. Unknown extra fields are kept. References to a missing option or record are allowed and shown as broken, never dropped. Research summaries (`audienceSummary`, `comparableSummary`, `researchProblems`, `researchKind`) never read or change the money model.
 
 ## Core rules (all covered by tests)
 - **Feasible headcounts:** 0 up to capacity, in whole groups when required. Never rounded up. Counts below the number already paid aren't scanned.

@@ -42,6 +42,7 @@ William owns this project and decides what gets merged. Claude is the lead imple
 - `surveyText()`: the supporter survey text
 - `boardMemo()`: the "Copy board summary" text
 - `renderWhatIf()`: "What would need to change?" (math in `E.whatWouldChange` / `E.compareOptions`; screen-only state in `whatIf`)
+- `viewResearch()`, `researchSection()`, `researchLines()`: the Research page and its summary on results and in the board summary (math-free; summaries via `E.audienceSummary` / `E.comparableSummary` / `E.researchProblems`)
 - `contractItems()` / `contractSection()`: the contract dates checklist (math-free; dates via `E.contractChecklist`, local `localYMD()`)
 - `viewGuide()` and `COLLECT`: the "How to use" page and the checklist of information to collect (mirrored in `docs/START_HERE.md`)
 - `loadSavedPlan()`, `backupSaved()`, `validatePlan()`, `importJson()`: everything that protects saved work. `loadSavedPlan()` must run after all constants are defined (see DECISION_LOG row 63).

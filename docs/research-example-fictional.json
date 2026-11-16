@@ -1,0 +1,386 @@
+{
+  "schemaVersion": 1,
+  "isDemo": true,
+  "eventName": "FICTIONAL PRACTICE — Booster Club Golf Day (with research)",
+  "settings": {
+    "fundraisingTarget": 5000,
+    "volunteerHourValue": null
+  },
+  "snapshot": {
+    "format": "Shotgun golf scramble, foursomes (fictional)",
+    "dateWindow": "a Saturday in May (fictional)",
+    "locationArea": "[fictional course area]",
+    "included": "golf, cart, lunch, player gift",
+    "beneficiary": "team equipment (fictional)",
+    "fallbackPrice": ""
+  },
+  "volunteerHoursAvailable": 120,
+  "scenarioSettings": {
+    "conservative": {
+      "label": "Conservative",
+      "statuses": [
+        "collected"
+      ],
+      "extraRevenuePerParticipant": 0,
+      "otherRevenue": 0,
+      "costContingencyPct": 0
+    },
+    "middle": {
+      "label": "Middle",
+      "statuses": [
+        "collected",
+        "committed"
+      ],
+      "extraRevenuePerParticipant": 0,
+      "otherRevenue": 0,
+      "costContingencyPct": 0
+    },
+    "optimistic": {
+      "label": "Optimistic",
+      "statuses": [
+        "collected",
+        "committed",
+        "hoped"
+      ],
+      "extraRevenuePerParticipant": 0,
+      "otherRevenue": 0,
+      "costContingencyPct": 0
+    }
+  },
+  "options": [
+    {
+      "id": "golf",
+      "name": "Shotgun golf day (fictional quote)",
+      "kind": "golf_shotgun",
+      "capacity": 100,
+      "groupSize": 4,
+      "wholeGroupsOnly": true,
+      "price": 125,
+      "groupPrice": 500,
+      "groupShare": 0.5,
+      "venueQuote": {
+        "flatFee": 0,
+        "perParticipant": 60,
+        "minimumParticipants": 72,
+        "minimumSpend": 0
+      },
+      "deposit": {
+        "amount": 1000,
+        "creditedTowardBill": true,
+        "refundable": false
+      },
+      "perParticipantCosts": [
+        {
+          "id": "gift",
+          "label": "Player gift",
+          "amount": 5
+        }
+      ],
+      "fixedCosts": [
+        {
+          "id": "other",
+          "label": "Prizes, signs and printing",
+          "amount": 800,
+          "paidUpfront": true
+        }
+      ],
+      "volunteerHours": 100,
+      "cancellationOwed": 4320,
+      "quoteVerified": true,
+      "costsVerified": true,
+      "upfrontFundingConfirmed": false,
+      "scenarioParticipants": {
+        "conservative": 48,
+        "middle": 72,
+        "optimistic": 100
+      }
+    }
+  ],
+  "sponsorships": [
+    {
+      "id": "sp1",
+      "label": "Collected sponsor (fictional)",
+      "amount": 1000,
+      "status": "collected",
+      "type": "cash",
+      "optionId": ""
+    },
+    {
+      "id": "sp2",
+      "label": "Written commitment (fictional)",
+      "amount": 500,
+      "status": "committed",
+      "type": "cash",
+      "optionId": ""
+    },
+    {
+      "id": "sp3",
+      "label": "Hoped-for sponsor (fictional)",
+      "amount": 500,
+      "status": "hoped",
+      "type": "cash",
+      "optionId": ""
+    }
+  ],
+  "evidence": {
+    "surveyResponses": 60,
+    "paidRegistrations": {
+      "golf": 32
+    },
+    "paidCashReceived": {
+      "golf": 4000
+    },
+    "namedHighIntent": {
+      "golf": 40
+    },
+    "surveyDefinitelyAtPrice": {
+      "golf": 0
+    },
+    "surveyProbablyAtPrice": {
+      "golf": 20
+    },
+    "offerTerms": {
+      "golf": {
+        "kind": "golf_shotgun",
+        "price": 12500,
+        "groupSize": 4,
+        "groupPrice": 50000,
+        "format": "Shotgun golf scramble, foursomes (fictional)",
+        "date": "a Saturday in May (fictional)",
+        "place": "[fictional course area]",
+        "included": "golf, cart, lunch, player gift",
+        "supports": "team equipment (fictional)"
+      }
+    }
+  },
+  "research": {
+    "audiences": [
+      {
+        "id": "aud_parents",
+        "name": "Current team parents",
+        "category": "parents",
+        "unit": "people",
+        "reach": 180,
+        "contacted": 120,
+        "responded": 45,
+        "source": "FICTIONAL: team roster count from the coach",
+        "sourceDate": "2026-11-02",
+        "overlapsWith": [
+          "aud_alumni"
+        ],
+        "optionIds": [
+          "golf"
+        ],
+        "notes": "Two adults per player at most; some are also alumni.",
+        "provenance": "observation",
+        "verification": "unchecked"
+      },
+      {
+        "id": "aud_alumni",
+        "name": "Alumni families on the newsletter list",
+        "category": "alumni",
+        "unit": "households",
+        "reach": 300,
+        "contacted": 300,
+        "responded": 18,
+        "source": "FICTIONAL: newsletter subscriber count",
+        "sourceDate": "2026-10-28",
+        "overlapsWith": [
+          "aud_parents"
+        ],
+        "optionIds": [
+          "golf"
+        ],
+        "notes": "Households, not people. Not everyone golfs.",
+        "provenance": "observation",
+        "verification": "unchecked"
+      },
+      {
+        "id": "aud_business",
+        "name": "Local businesses that sponsored before",
+        "category": "businesses",
+        "unit": "businesses",
+        "reach": 40,
+        "contacted": 12,
+        "responded": null,
+        "source": "",
+        "sourceDate": null,
+        "overlapsWith": [],
+        "optionIds": [
+          "golf"
+        ],
+        "notes": "Possible sponsors, not players.",
+        "provenance": "estimate",
+        "verification": "unchecked"
+      },
+      {
+        "id": "aud_league",
+        "name": "Members of the Tuesday golf league",
+        "category": "golfers",
+        "unit": "people",
+        "reach": null,
+        "contacted": null,
+        "responded": null,
+        "source": "",
+        "sourceDate": null,
+        "overlapsWith": [
+          "aud_parents"
+        ],
+        "optionIds": [
+          "golf"
+        ],
+        "notes": "Size not known yet: ask the league secretary.",
+        "provenance": "estimate",
+        "verification": "unchecked"
+      }
+    ],
+    "comparables": [
+      {
+        "id": "cmp_rotary",
+        "name": "FICTIONAL Rotary spring scramble",
+        "eventType": "Golf: shotgun scramble",
+        "location": "[fictional course, same county]",
+        "eventDate": "2026-05-16",
+        "sourceUrl": "https://example.org/fictional-rotary-scramble",
+        "sourceRef": "",
+        "checkedDate": "2026-11-03",
+        "sourceQuality": "official",
+        "format": "18 holes, shotgun, foursomes",
+        "included": "golf, cart, lunch, gift",
+        "pricingTier": "regular",
+        "priceSingle": 150,
+        "priceGroup": 560,
+        "groupSize": 4,
+        "feesPerPerson": 5,
+        "feesNote": "Card processing fee shown at checkout",
+        "resultAttendance": null,
+        "resultVerified": false,
+        "resultNote": "Flyer says \"limited to 36 teams\"; capacity recorded above; no result known.",
+        "comparability": "close",
+        "differences": "Includes dinner afterwards.",
+        "optionIds": [
+          "golf"
+        ],
+        "provenance": "observation",
+        "verification": "unchecked",
+        "groupPriceBasis": "advertised",
+        "advertisedCapacity": 144
+      },
+      {
+        "id": "cmp_pta",
+        "name": "FICTIONAL PTA charity golf day",
+        "eventType": "Golf: shotgun scramble",
+        "location": "[fictional course, next town]",
+        "eventDate": "2026-09-12",
+        "sourceUrl": "",
+        "sourceRef": "Printed flyer, photographed 2026-11-04",
+        "checkedDate": "2026-11-04",
+        "sourceQuality": "official",
+        "format": "18 holes, shotgun, foursomes",
+        "included": "golf, cart, lunch",
+        "pricingTier": "early",
+        "priceSingle": 125,
+        "priceGroup": 480,
+        "groupSize": 4,
+        "feesPerPerson": 0,
+        "feesNote": "Cash or check only",
+        "resultAttendance": 88,
+        "resultVerified": true,
+        "resultNote": "Organizer told us 88 players paid (treasurer report).",
+        "comparability": "close",
+        "differences": "Early-bird price; regular was $140.",
+        "optionIds": [
+          "golf"
+        ],
+        "provenance": "observation",
+        "verification": "checked",
+        "groupPriceBasis": "advertised",
+        "advertisedCapacity": null
+      },
+      {
+        "id": "cmp_nine",
+        "name": "FICTIONAL nine-hole family scramble",
+        "eventType": "Golf: 9 holes",
+        "location": "[fictional municipal course]",
+        "eventDate": "2026-06-01",
+        "sourceUrl": "javascript:alert(1)",
+        "sourceRef": "",
+        "checkedDate": "2026-11-05",
+        "sourceQuality": "secondhand",
+        "format": "9 holes, tee times",
+        "included": "golf only",
+        "pricingTier": "regular",
+        "priceSingle": 60,
+        "priceGroup": null,
+        "groupSize": null,
+        "feesPerPerson": null,
+        "feesNote": "",
+        "resultAttendance": null,
+        "resultVerified": false,
+        "resultNote": "A parent said it \"sold out\" — not verified.",
+        "comparability": "partial",
+        "differences": "Nine holes, no cart or lunch: not the same offer.",
+        "optionIds": [
+          "golf"
+        ],
+        "provenance": "observation",
+        "verification": "unchecked",
+        "groupPriceBasis": "unknown",
+        "advertisedCapacity": null
+      },
+      {
+        "id": "cmp_country",
+        "name": "FICTIONAL country-club invitational",
+        "eventType": "Golf: shotgun",
+        "location": "[fictional private club]",
+        "eventDate": "2026-08-20",
+        "sourceUrl": "https://example.org/fictional-invitational",
+        "sourceRef": "",
+        "checkedDate": "2026-11-05",
+        "sourceQuality": "official",
+        "format": "18 holes, shotgun",
+        "included": "golf, cart, dinner, open bar",
+        "pricingTier": "regular",
+        "priceSingle": 275,
+        "priceGroup": null,
+        "groupSize": null,
+        "feesPerPerson": null,
+        "feesNote": "Fees not shown",
+        "resultAttendance": null,
+        "resultVerified": false,
+        "resultNote": "",
+        "comparability": "close",
+        "differences": "Private club, dinner and bar included.",
+        "optionIds": [
+          "golf"
+        ],
+        "provenance": "observation",
+        "verification": "unchecked",
+        "groupPriceBasis": "unknown",
+        "advertisedCapacity": null
+      }
+    ],
+    "links": [
+      {
+        "id": "lnk_price",
+        "optionId": "golf",
+        "assumption": "price",
+        "researchIds": [
+          "cmp_rotary",
+          "cmp_pta"
+        ],
+        "note": "Our $125 sits between the two close comparisons (fees included). Not a recommendation."
+      },
+      {
+        "id": "lnk_likely",
+        "optionId": "golf",
+        "assumption": "middle",
+        "researchIds": [
+          "aud_parents",
+          "aud_league"
+        ],
+        "note": "72 is our own estimate. Survey: 40 named yes + 32 paid. Research does not set this number."
+      }
+    ]
+  }
+}
