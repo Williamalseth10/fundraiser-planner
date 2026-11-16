@@ -270,6 +270,15 @@ ul.warnlist li { color: var(--warn); }
 .kind-observation { color: var(--ok); border-color: var(--ok); } .kind-unrecorded { color: var(--text-2); }
 table.obs-t td { white-space: normal; min-width: 120px; } table.obs-t td:first-child { min-width: 150px; }
 ul.obs-notes li { color: var(--text-2); }
+/* Batch 2: evidence stages, scenario reasons, shortcuts, same turnout */
+.funnel { border-top: 1px solid var(--border); margin-top: 16px; }
+ol.stages { list-style: none; padding: 0; margin: 6px 0; display: flex; flex-wrap: wrap; gap: 4px 6px; }
+ol.stages li { border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; background: var(--surface-2); font-size: 14px; display: inline-flex; flex-wrap: wrap; gap: 2px 6px; align-items: baseline; }
+ol.stages li span { color: var(--text-2); } ol.stages li b { font-variant-numeric: tabular-nums; }
+.why { border-top: 1px dashed var(--border); margin-top: 6px; padding-top: 6px; font-size: 14px; }
+.why-h { font-weight: 700; display: block; } .why i, ol.stages i { font-style: normal; color: var(--muted); font-weight: 400; }
+table.sc-t td.wrap, table.st-t td.wrap { white-space: normal; }
+.st-result { font-size: 17px; }
 input[type=date] { font: inherit; font-size: 16px; color: var(--text); background: var(--surface); border: 1.5px solid var(--border); border-radius: 8px; padding: 9px 11px; width: 100%; min-height: 46px; }
 .guide { max-width: 820px; }
 .guide h1 { margin-bottom: 8px; }

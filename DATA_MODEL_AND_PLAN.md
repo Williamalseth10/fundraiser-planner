@@ -30,10 +30,11 @@ Plan {
       label, statuses: ['collected'|'committed'|'hoped'], extraRevenuePerParticipant, otherRevenue, costContingencyPct } },
   options: [ EventOption ],
   sponsorships: [ Sponsorship ],
-  evidence: { surveyResponses, paidRegistrations{optId:n}, paidCashReceived{optId:$|null},
+  evidence: { surveyResponses, surveyContacted?|null (row 87), paidRegistrations{optId:n}, paidCashReceived{optId:$|null},
               namedHighIntent{optId:n}, surveyDefinitelyAtPrice{optId:n}, surveyProbablyAtPrice{optId:n},
               offerTerms{optId: {kind, price, groupSize, groupPrice, format, date, place, included, supports}},
-              surveyIssuedTerms{optId: same shape} }
+              surveyIssuedTerms{optId: same shape},
+              offerHistory?{optId: [{ id, archivedOn, terms (as offerTerms)|null, named, definitely, probably, surveyResponses|null, surveyContacted|null }]} (row 87; past rounds, never counted) }
 }
 EventOption {
   id, name, kind: golf_tee_times|golf_shotgun|participation|ticketed|auction|product|generic,
@@ -66,6 +67,8 @@ research? {                                   (optional, row 84; never read by a
 ```
 
 **Schema note (row 78):** `contract` is optional and additive, so `schemaVersion` stays 1 and older plans and files load unchanged. Dates are calendar text (`YYYY-MM-DD`), compared as calendar days against the local date. A file with an impossible date or non-text notes is refused whole and changes nothing. The "What would need to change?" boxes and the save-time line are screen-only: they are never written to the plan or to storage.
+
+**Batch 2 note (row 87):** `surveyContacted` and `offerHistory` are optional; past rounds are listed but never added to current answers or used by `decide()`. Entries for a removed option are kept and ignored (row 86). Engine additions: `interestFunnel`, `capacityShortcuts`, `compareAtSameTurnout`, all built on `project()`. Row 88: `compareAtSameTurnout` withholds the comparison when the two options count different things (`unitOf`), keeps `project()`'s warnings, and gives no recovery figures when costs are equal or either side is below its paid registrations.
 
 **Research schema note (rows 84-85):** provenance and verification are explicit; a missing provenance reads as "not recorded (older record)" and a missing verification as "not checked", and neither is ever inferred from a source or URL. In a real plan, fictional records are listed but left out of every summary. There is no combined price range: similar events are listed side by side. `research` is optional and additive, so `schemaVersion` stays 1, older plans and files load unchanged, and nothing is migrated. Every known research field is type-checked on import; a bad record refuses the whole file. Unknown extra fields are kept. References to a missing option or record are allowed and shown as broken, never dropped. Research summaries (`audienceSummary`, `comparableSummary`, `researchProblems`, `researchKind`) never read or change the money model.
 

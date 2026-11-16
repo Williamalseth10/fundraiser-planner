@@ -38,7 +38,9 @@ python3 test/ui_smoke.py       # browser: every step, phone width, examples
 python3 test/ui_review.py      # browser: import safety, injected markup, keyboard access
 python3 test/ui_clarity.py     # browser: first-use wording, product-sale grouping correction
 python3 test/ui_whatif.py      # browser: what would need to change, applying a price, contract dates, time zones, phone tables
-python3 test/ui_research.py    # browser: research records, units and overlap, price ranges, safe links, backups, malformed files
+python3 test/ui_research.py    # browser: research records, provenance, side-by-side events, safe links, backups, malformed files
+python3 test/ui_scenarios.py   # browser: evidence stages, past rounds, scenario reasons, capacity shortcuts, same-turnout comparison
+python3 test/ui_option_delete.py # browser: removing an option keeps the plan readable after a reload
 python3 test/ui_journey.py     # browser: full session, reload, backup file, restore, print, widths, dark mode
 ```
 Optional: pass a folder to `ui_smoke.py` or `ui_journey.py` to save screenshots (and a print PDF from the journey).

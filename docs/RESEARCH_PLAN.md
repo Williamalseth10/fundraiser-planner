@@ -65,28 +65,32 @@ research: {
 | D. Unknown fields not erased | Records are edited in place; unknown keys survive save, export and import (tested) | Implemented |
 | D. Financial results unchanged by research | Tested: same projections, decide and evidence with and without research | Implemented |
 
-## Batch 2: Interest and scenarios (plan only)
-| Requirement | Design | Status |
-|---|---|---|
-| Responses tied to price, format and offer version | Interest records `{ optionId, offerTerms (from `E.offerTerms`), yes, maybe, no, named, source, date }`; an offer version is the recorded terms. Current vs stale reuses `evidenceStatus` logic. | Deferred |
-| No combining respondents across offers | Totals only within one offer version; across versions show side by side, never summed | Deferred |
-| Evidence-linked low/middle/high | Proposed values shown beside each scenario with the evidence they come from (e.g. low = paid; middle = paid + named for the current offer); organizer clicks "Use" per value | Deferred |
-| 50/75/100% capacity shortcuts | `normalizeParticipants(cap × p)` (whole groups, rounded down, never above capacity); shown as buttons; labeled as shortcuts, not evidence | Deferred |
-| Explicit action before applying | Two-click confirm, same pattern as "Use $X in my plan" | Deferred |
-| Invalidation on price or offer change | Existing `evidenceStatus` / `offerTerms`; applied scenario records which offer version it came from and is flagged when stale | Deferred |
-| Shotgun vs tee times: extra cost and revenue needed | Engine function comparing two options at the same headcount: Δcost, Δrevenue, and the extra firm money needed. **No extra attendance assumed.** | Deferred |
-| No WTP curve or success probability | None | Deferred (rule) |
+## Batch 2: Interest and scenarios (implemented on branch `batch2-interest-scenarios`; row 87)
+Reconciled with the Batch 2 brief. The rule is: reuse what works, add only what is missing.
 
-## Batch 3: "Ready to commit?" (plan only)
+| Requirement | Existing functionality | Change (smallest coherent) |
+|---|---|---|
+| 1. Responses tied to a specific offer (price, package, date, option) | Per-option counts (`namedHighIntent`, `surveyDefinitelyAtPrice`, `surveyProbablyAtPrice`) plus `offerTerms` = price, group price and size, kind, description, date, place, inclusions, cause | **Reuse.** No second set of interest records, which would duplicate or contradict these counts |
+| 1. Separate contacted / responses / interested / named / paid / money received | Responses (whole survey), named "yes", anonymous "yes", "maybe", paid, money received | **Add** `evidence.surveyContacted` (whole survey, `null` = unknown) and a per-option funnel on the evidence step that labels each stage and never adds stages together |
+| 1. No contact lists or demographic inference | Counts only; survey Q8 names stay in the organizer's records | None (rule kept) |
+| 1. Offer change marks interest stale, without erasing history or payments | `evidenceStatus` flags stale; but re-asking meant typing over the old counts, losing them | **Add** "Keep these as a past round": moves the option's interest counts and their offer terms to `evidence.offerHistory[optionId]` and clears the current counts. **Paid registrations and money received are never moved or changed.** Past rounds are listed per offer and never summed with current answers |
+| 2. Document why low/likely/high; link research | Batch 1 research notes can cite research for `conservative/middle/optimistic` | **Reuse.** The scenario step shows each number's notes and cited research, with "Add a reason", which opens a note on the Research page; labeled "your scenario, not a prediction" |
+| 2. Research never changes inputs, evidence or status | Tested in Batch 1 | Extended to the new data |
+| 3. 50/75/100% capacity shortcuts with preview and Apply | None | **Add** engine `capacityShortcuts()`: whole groups rounded down, capacity, minimums and deposit floor via `project()`. The preview shows players, revenue, costs, net (with the chosen case's assumptions), firm-money net and cash shortfall. "Use N as low/likely/high" asks twice; the applied result equals the preview (same engine call). Paid and receipts untouched; no shortcut below the number already paid |
+| 4. Shotgun vs tee times: incremental cost, extra paid golfers or firm sponsorship to cover it | `compareOptions` (each at its own likely number) and the what-if panel. Neither shows the extra cost at the **same** turnout | **Add** engine `compareAtSameTurnout()`: costs and net of two options at one requested number (each rounded to its own whole groups); the extra cost; the extra firm sponsorship that closes the gap; and the smallest number of additional paying players on the costlier option that would close it (exact scan, so group pricing and minimums are handled), or "can't be recovered within capacity". It is labeled as a requirement, not a forecast, with any expected benefit of a format kept out of the numbers |
+| Board summary | Existing per-option sections | **Add** the funnel, past rounds, scenario reasons and the same-turnout comparison, concisely |
+
+## Batch 3: "Ready to commit?" (plan only; updated after Batch 2)
 | Requirement | Design | Status |
 |---|---|---|
-| One page: numbers require / evidence supports / remains at risk / next | `#decide` page per option built from `decide()`, `whatWouldChange()`, research and criteria; no new status logic | Deferred |
-| Organizer decision dates and criteria | `plan.criteria = { decideBy, minPaid, minFirmSponsorship, minCollectedCash, maxExposure, minVolunteerHours, quoteQuestionsResolved }` | Deferred |
-| Met / unmet / unknown | Pure engine evaluation; blank criterion = unknown, not met | Deferred |
-| Criteria met ≠ approval or success | Fixed wording, the same as today's statuses | Deferred (rule) |
-| No silent change to status rules | Criteria shown beside the status, never fed into `decide()` | Deferred (rule) |
-| "Why does it say that?" | Expandable explanation per conclusion from the existing reasons and inputs | Deferred |
-| Printable board brief | One page per option: calculations, research, assumptions and open questions in four labeled blocks | Deferred |
+| One page: numbers require / evidence supports / missing or stale / cash and risk / next action | `#decide` page per option built only from existing results: `decide()` (status, reasons, missing), `whatWouldChange()` (gaps), the Batch 2 funnel and past rounds, research problems, `compareAtSameTurnout()` when two options are chosen, and contract dates. No new status logic | Deferred |
+| Organizer criteria | `plan.criteria = { decideBy (date), minNet ($), maxLoss ($), volunteerHourBudget (h) }`, optional. `maxLoss` is compared with **both** the two-case loss and `worstOnChart` (the lower one counts) | Deferred |
+| Met / unmet / unknown with reasons | Pure engine function; a blank criterion or blank evidence = **unknown**, never met. For example, minNet compares with firm net at the likely number; volunteer hours unknown if hours available is blank | Deferred |
+| Next action: validate / adjust / take to the board | Rule order: any unknown or stale evidence → "validate" (named gaps); any unmet criterion → "adjust" (link to What would need to change?); else → "take the documented proposal to the board" (never "approved") | Deferred |
+| Time and effort without a money value for hours | Hours vs budget only; the existing optional hour value stays off unless the organizer set it | Deferred (rule) |
+| Never guaranteed, predicted or auto-approved | Fixed wording, tested | Deferred (rule) |
+| Printable brief | Calculations / evidence / assumptions / open questions as four labeled blocks per option | Deferred |
+| **Learned in Batch 2** | (a) Past rounds must be shown, never counted; Batch 3's "evidence supports" uses current-offer counts only. (b) Capacity shortcuts are not evidence: Batch 3 should flag a likely number that equals a 50/75/100% shortcut and has no cited reason as an assumption to validate. (c) The same-turnout comparison is the right input for "is the extra format worth it?"; keep its "not a forecast" wording. (d) From the review of `b496eae` (row 88): Batch 3 must reuse its guards. Never compare options that count different things, never give recovery figures below the number already paid, and treat equal costs as "not applicable", not "nothing needed". | Plan |
 
 ## Order of work
 Batch 1, then review, then Batch 2 (it needs Batch 1's records for sources), then review, then Batch 3 (it reads both).

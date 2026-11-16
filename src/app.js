@@ -377,8 +377,10 @@
       <div class="scen">
         ${SC.map((k) => `<div class="scen-col"><b>${esc(ss[k].label)}</b><span class="hint">${{ conservative: t.survey === 'buy' ? 'If sales disappoint. Start with paid orders only.' : 'If turnout disappoints. Start with paid sign-ups only.', middle: 'What your evidence supports: paid + named “yes”.', optimistic: 'If outreach goes well. Stay at or under capacity.' }[k]}</span>
           ${num(`${p}.scenarioParticipants.${k}`, t.survey === 'buy' ? 'Items sold' : `Paying ${t.many}`, { step: 1 })}
-          ${t.proceeds ? num(`${p}.scenarioProceeds.${k}`, 'Auction and raffle money you would count on ($)') : ''}</div>`).join('')}
+          ${t.proceeds ? num(`${p}.scenarioProceeds.${k}`, 'Auction and raffle money you would count on ($)') : ''}
+          ${scenarioReasons(o, i, k)}</div>`).join('')}
       </div>
+      ${shortcutsPanel(o, i)}
       ${t.proceeds ? '<p class="hint">Auction and raffle money is your own figure for each case. It is counted in the low, likely and high totals but <b>not</b> in break-even, because donated items don\'t guarantee bids. Keep the low case low, and don\'t enter the same raffle money again under “Adjust assumptions”.</p>' : ''}
       <details class="qs"><summary>Adjust assumptions (sponsors counted, priced add-ons, cost cushion)</summary>
         <p class="hint">Add-ons and other income here are assumptions. They show up in the low, likely and high totals but never in break-even. If every ${esc(t.one)} must pay something, include it in the price instead.</p>
@@ -408,7 +410,7 @@
       const c = choices.get(l.id) || { label: l.label || 'Unnamed cost', where: [] };
       c.where.push(`${o.name}: ${money(l.amount)}`); choices.set(l.id, c);
     }));
-    const optSel = (j, v, nm) => `<select data-path="sponsorships.${j}.optionId" aria-label="Which option ${nm} applies to"><option value="">All options</option>${state.options.map((o) => `<option value="${esc(o.id)}" ${o.id === v ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>`;
+    const optSel = (j, v, nm) => `<select data-path="sponsorships.${j}.optionId" aria-label="Which option ${nm} applies to"><option value="">All options</option>${v && !state.options.some((o) => o.id === v) ? `<option value="${esc(v)}" selected>(option removed: counts for no option)</option>` : ''}${state.options.map((o) => `<option value="${esc(o.id)}" ${o.id === v ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>`;
     return `<div class="table-wrap"><table class="edit">
       <thead><tr><th>Sponsor or donation</th><th>Value ($)</th><th>Status</th><th>Type</th><th>Budgeted cost it replaces</th><th>Applies to</th><th><span class="sr-only">Remove</span></th></tr></thead>
       <tbody>${state.sponsorships.map((s, j) => { const nm = esc(s.label || `Sponsor ${j + 1}`); return `<tr>
@@ -561,12 +563,12 @@ Report raw counts, never percentages applied to a whole school or community. Sur
 
   function stepEvidence() {
     const field = (key, o) => `<input type="number" inputmode="numeric" min="0" step="1" data-path="evidence.${key}.${esc(o.id)}" data-type="number" value="${esc((state.evidence[key] || {})[o.id] || 0)}" aria-label="${esc(o.name)}: ${key}">`;
-    return `<div class="fields">${num('evidence.surveyResponses', 'How many people answered the survey?', { step: 1 })}</div>
+    return `<div class="fields">${num('evidence.surveyContacted', 'How many people did you send the survey to?', { step: 1, placeholder: 'not recorded', help: 'Leave blank if you don’t know. It is shown as “not recorded”, never as 0.' })}${num('evidence.surveyResponses', 'How many people answered the survey?', { step: 1 })}</div>
       <div class="table-wrap"><table class="edit">
         <thead><tr><th>Option</th><th>Already paid (${'people or items'})</th><th>Money actually received ($)<br><span class="muted">from your records</span></th><th>Said “Yes” and left their name</th><th>Said “Yes” anonymously</th><th>Said “Maybe”</th></tr></thead>
         <tbody>${state.options.map((o) => `<tr><td>${esc(o.name)}</td><td>${field('paidRegistrations', o)}</td><td>${cashField(o)}</td><td>${field('namedHighIntent', o)}</td><td>${field('surveyDefinitelyAtPrice', o)}</td><td>${field('surveyProbablyAtPrice', o)}</td></tr>`).join('')}</tbody>
       </table></div>
-      ${state.options.map(termsNote).join('')}
+      ${state.options.map(interestBlock).join('')}
       <ul class="plain hint">
         <li>Count <b>people</b> for events and <b>items</b> for product sales (add up quantities; count “3 or more” as 3).</li>
         <li>Count someone buying for a whole group or table as the full group only if they confirmed it and the others aren't also on your survey list.</li>
@@ -579,6 +581,135 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <div class="row-actions"><label class="small filebtn">Choose CSV file<input type="file" class="file-input" accept=".csv,text/csv" data-action="import-csv"></label>
         <button class="small" data-action="csv-template">Show CSV template</button></div>
       </details>`;
+  }
+
+  // ---------- Batch 2: interest by offer, scenario reasons, capacity shortcuts, same turnout (row 87) ----------
+  const stageCount = (v, unit) => (v == null ? 'not recorded' : `${Number(v).toLocaleString('en-US')}${unit ? ` ${unit}` : ''}`);
+  const termsWords = (t) => (t && typeof t.price === 'number' ? termsText(t) : 'an offer that was not recorded');
+  // One option's evidence, stage by stage (never added together), its past rounds and the "keep as a past round" action.
+  function interestBlock(o, i) {
+    const f = E.interestFunnel(state, o), t = T(o), unit = t.survey === 'buy' ? 'items' : t.many;
+    const any = f.named || f.anonymousYes || f.maybe;
+    const notCounted = f.named && f.offerState !== 'current' ? ` <span class="flag">not counted: ${f.offerState === 'stale' ? 'the offer changed since' : 'offer not recorded'}</span>` : '';
+    return `<section class="funnel" data-funnel="${esc(o.id)}"><h3 class="sub">${esc(o.name)}: evidence, stage by stage</h3>
+      <ol class="stages">
+        <li><span>Sent the survey <i>(whole survey)</i></span><b>${esc(stageCount(f.contacted, 'people'))}</b></li>
+        <li><span>Answered <i>(whole survey)</i></span><b>${esc(stageCount(f.responses, 'people'))}</b></li>
+        <li><span>Said “Yes” and left a name</span><b>${f.named} ${esc(unit)}</b>${notCounted}</li>
+        <li><span>Said “Yes” anonymously</span><b>${f.anonymousYes} ${esc(unit)}</b></li>
+        <li><span>Said “Maybe”</span><b>${f.maybe} ${esc(unit)}</b></li>
+        <li><span>Already paid</span><b>${f.paid} ${esc(unit)}</b></li>
+        <li><span>Money actually received</span><b>${f.cashReceived == null ? 'not entered' : money(f.cashReceived)}</b></li>
+      </ol>
+      <p class="hint">Each line is its own count. They are never added together, and none of them is a forecast of who will come.</p>
+      ${termsNote(o, i)}
+      ${any ? `<div class="row-actions"><button class="small" data-action="archive-round" data-i="${i}">Keep these answers as a past round and start fresh</button></div>
+        <p class="hint">Use this before you ask supporters again about a changed offer. The current “yes” and “maybe” counts move to a past round, with the offer they were for. Paid sign-ups and money received stay exactly as they are.</p>` : ''}
+      ${f.pastRounds.length ? `<details class="qs" data-keep="rounds-${esc(o.id)}" ${openRecords.has('rounds-' + o.id) ? 'open' : ''}><summary>Past rounds for this option (${f.pastRounds.length}; kept for the record, never added to current answers)</summary>
+        <ul class="plain">${f.pastRounds.map((r) => `<li>${r.archivedOn ? `Kept ${esc(showDate(r.archivedOn))}` : 'Kept (date not recorded)'}: answers for ${esc(termsWords(r.terms))}. ${r.named} named “yes”, ${r.anonymousYes} anonymous “yes”, ${r.maybe} “maybe”. Whole survey at the time: ${esc(stageCount(r.responses))} answered, ${esc(stageCount(r.contacted))} sent.</li>`).join('')}</ul></details>` : ''}
+    </section>`;
+  }
+
+  // Why the organizer chose each scenario number: the Batch 1 research notes for that number, shown in place.
+  function scenarioReasons(o, i, k) {
+    const ls = research().links.filter((l) => l.optionId === o.id && l.assumption === k);
+    return `<div class="why"><span class="why-h">Why this number <i>(your scenario, not a prediction)</i></span>
+      ${ls.length ? `<ul class="plain">${ls.map((l) => `<li>${esc(l.note || 'No reason written yet.')}${(l.researchIds || []).length ? ` <span class="muted">(cites ${(l.researchIds).map((id) => { const r = recsById(id); return r ? esc(r.name || 'a record') : 'a removed record'; }).join(', ')})</span>` : ''}</li>`).join('')}</ul>` : '<p class="hint">No reason recorded yet.</p>'}
+      <button class="small" data-action="add-scenario-reason" data-i="${i}" data-k="${k}">Add a reason</button></div>`;
+  }
+
+  // 50/75/100% of capacity, previewed with the engine, applied only by a confirmed click (same engine call).
+  let shortcutTarget = 'middle'; // screen-only
+  function shortcutsPanel(o, i) {
+    const t = T(o), ss = state.scenarioSettings, unit = t.survey === 'buy' ? 'items' : t.many;
+    const open = openRecords.has('shortcuts') ? 'open' : '';
+    const sc = E.capacityShortcuts(state, o, shortcutTarget);
+    if (!sc.available) return `<details class="qs" data-keep="shortcuts" ${open}><summary>Capacity shortcuts: 50%, 75% or 100% of capacity</summary><p class="hint">Enter the capacity on the quote step first.</p></details>`;
+    const label = esc(ss[sc.scenario].label);
+    const grp = E.participantStep(o) > 1 ? ` rounded down to whole ${esc(t.groupName || 'group')}s of ${E.participantStep(o)}` : '';
+    return `<details class="qs shortcuts" data-keep="shortcuts" ${open}><summary>Capacity shortcuts: 50%, 75% or 100% of capacity</summary>
+      <p class="hint">Arithmetic on the capacity you entered (${sc.capacity} ${esc(unit)})${grp}. <b>These are not evidence that this many will come.</b> Preview first: nothing changes until you choose “Use … as ${label}” and confirm. Paid sign-ups, money received and sponsors are never changed.</p>
+      <div class="fields"><label class="f"><span>Preview for</span><select data-shortcut="target">${SC.map((k) => `<option value="${k}" ${k === sc.scenario ? 'selected' : ''}>${esc(ss[k].label)} case (now ${esc(String((o.scenarioParticipants || {})[k] ?? 0))})</option>`).join('')}</select></label></div>
+      <p class="scroll-hint hint">Scroll the table sideways to see every column.</p>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="Capacity shortcuts"><table class="res sc-t"><thead><tr><th>Share of capacity</th><th>${esc(cap(unit))}</th><th>Revenue</th><th>Costs</th><th>Money left<br><span class="muted">${label} case assumptions</span></th><th>Firm money only</th><th>Cash short before the event</th><th></th></tr></thead><tbody>
+        ${sc.rows.map((r) => `<tr data-shortcut-row="${r.pct}"><td>${r.pct}%</td><td>${r.participants}${r.flags.length ? ` <span class="flag">${r.flags.includes('over_capacity') ? 'capped' : 'rounded down'} from ${r.requested}</span>` : ''}${r.venueMinimumApplied ? ` <span class="flag">${esc(t.venue)} minimum applies</span>` : ''}</td>
+          <td>${money(r.revenue)}</td><td>${money(r.expenses)}</td><td class="${r.net < 0 ? 'neg' : ''}">${money(r.net)}</td><td class="${r.firmNet < 0 ? 'neg' : ''}">${money(r.firmNet)}</td><td class="${r.cashShort > 0 ? 'neg' : ''}">${r.cashShort > 0 ? money(r.cashShort) : 'none'}</td>
+          <td class="wrap">${r.belowPaid ? `<span class="flag">below the ${sc.paid} already paid</span>` : r.isCurrent ? `<span class="muted">already your ${label} number</span>` : `<button class="small" data-action="apply-shortcut" data-i="${i}" data-pct="${r.pct}">Use ${r.participants} as ${label}</button>`}</td></tr>`).join('')}
+      </tbody></table></div></details>`;
+  }
+
+  // Two options at the SAME turnout: the extra documented cost and what would cover it. Screen-only choices.
+  const sameT = { a: '', b: '', n: '' };
+  function samePair() {
+    const find = (id) => state.options.find((o) => o.id === id);
+    const tee = state.options.find((o) => o.kind === 'golf_tee_times'), sg = state.options.find((o) => o.kind === 'golf_shotgun');
+    const [da, db] = tee && sg ? [tee, sg] : [state.options[0], state.options[1]];
+    let A = find(sameT.a) || da, B = find(sameT.b) || db;
+    if (A === B) B = state.options.find((o) => o !== A);
+    return [A, B];
+  }
+  function sameTurnout() {
+    const [A, B] = samePair();
+    // Default: the first option's likely number, raised to the most already paid on either side (row 88), but never more
+    // than both options can take, so the comparison is like for like. Nothing is saved.
+    const paid = (o) => Number(((state.evidence || {}).paidRegistrations || {})[o.id]) || 0;
+    const n = sameT.n === '' ? Math.min(Math.max(Number((A.scenarioParticipants || {}).middle) || 0, paid(A), paid(B)), E.maxFeasible(A), E.maxFeasible(B)) : Math.max(0, Number(sameT.n) || 0);
+    return { A, B, n, r: E.compareAtSameTurnout(state, A, B, n) };
+  }
+  function sameTurnoutWords(A, B, r) {
+    // Different counting units (row 88): 48 guests and 48 items are not the same turnout, so nothing is compared.
+    if (!r.comparable) return `Not compared at the same turnout: ${A.name} counts ${r.units.a} and ${B.name} counts ${r.units.b}. The same number of ${r.units.a} and ${r.units.b} is not the same turnout, so no extra cost or recovery figures are given. Compare each at its own numbers in the Side by side table below.`;
+    const many = T(A).many;
+    if (r.reason === 'belowPaid') {
+      const why = [r.a, r.b].filter((x) => x.belowPaid).map((x) => x.capacityBelowPaid
+        ? `${x.name} has ${x.paid} ${many} already paid but can take at most ${x.maxFeasible}: check its capacity and the paid count`
+        : `${x.name} has ${x.paid} ${many} already paid, more than ${x.participants}`).join('; ');
+      const need = Math.max(r.a.paid, r.b.paid), fits = Math.min(r.a.maxFeasible, r.b.maxFeasible) >= need;
+      return `No recovery figures: ${why}. Money already received is counted as received and is not changed. ${fits ? `Choose at least ${need} ${many} to compare what the extra cost would take.` : 'Fix the capacity or the paid count before comparing.'}`;
+    }
+    if (!r.costlierId) {
+      const higher = r.higherNetId === A.id ? r.a.name : r.b.name;
+      return `Both cost the same (${money(r.a.expenses)}) at this number, so there is no extra cost to cover and no recovery figures apply.${r.higherNetId ? ` Their firm money still differs by ${money(r.netDifference)} (${higher} ends up with more), because of ticket prices or option-specific sponsorship, not costs.` : ' They also end up with the same firm money.'}`;
+    }
+    const [Y, X] = r.costlierId === A.id ? [r.a, r.b] : [r.b, r.a];
+    const head = r.sameCount ? `${Y.name} costs ${money(r.extraCost)} more than ${X.name} at ${Y.participants} ${many}.`
+      : `Not like for like: ${Y.name} is counted at ${Y.participants} and ${X.name} at ${X.participants} (capacity or whole-group rules). At those numbers ${Y.name} costs ${money(r.extraCost)} more.`;
+    if (!(r.sponsorshipToCover > 0)) return `${head} It still ends up with at least as much firm money at that number, so nothing extra is needed.`;
+    return `${head} To end up with as much firm money as ${X.name} at that number, it would need ${money(r.sponsorshipToCover)} more firm sponsorship (collected or promised in writing), or ${r.recoverable ? `${r.playersToCover} more paying ${many} (${Y.participants + r.playersToCover} in all)` : `more paying ${many} than its capacity allows: the gap can't be closed by sales within capacity (${r.maxFeasibleCostlier})`}.`;
+  }
+  function sameTurnoutPanel() {
+    if (state.options.length < 2) return '';
+    const { A, B, n, r } = sameTurnout();
+    const optSel = (key, cur) => `<select data-same="${key}">${state.options.map((o) => `<option value="${esc(o.id)}" ${o === cur ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>`;
+    const intro = `<section class="panel same-turnout" aria-labelledby="st-title"><h2 id="st-title">Compare two options at the same turnout</h2>
+      <p class="hint">What the extra cost of one format would take, if <b>both drew the same number of people</b>. It does not assume a format (such as a shotgun start) brings more people or a higher price: if you expect that, it is your own assumption and it is not in these numbers. Firm money only.</p>`;
+    if (!r.comparable) {
+      return `${intro}<div class="fields wi-controls"><label class="f"><span>Option</span>${optSel('a', A)}</label><label class="f"><span>Compared with</span>${optSel('b', B)}</label></div>
+      <p class="callout warn-callout st-result"><span>${esc(sameTurnoutWords(A, B, r))}</span></p></section>`;
+    }
+    const col = (x) => [x.participants + (x.flags.length ? ` (${x.requested !== x.participants ? `from ${x.requested}: ` : ''}${x.flags.map((f) => (f === 'fewer_than_already_paid' ? `fewer than the ${x.paid} already paid` : f.replace(/_/g, ' '))).join(', ')})` : ''), money(x.revenue), money(x.costs.venue), money(x.costs.perParticipant), money(x.costs.fixed), money(x.costs.separateDepositFee), money(x.costs.contingency), money(x.expenses), money(x.net), money(x.cashNeeded), `${x.quoteVerified ? 'quote in writing' : 'quote not confirmed'}; ${x.costsVerified ? 'costs are quotes' : 'costs are estimates'}`];
+    const ca = col(r.a), cb = col(r.b);
+    const labels = ['Participants', 'Revenue (ticket money + firm sponsorship)', 'Venue or supplier', 'Per-person costs', 'One-time costs', 'Separate deposit fee', 'Cost cushion', 'Total costs', 'Firm money left', 'Cash needed before the event', 'Where the costs come from'];
+    return `${intro}
+      <div class="fields wi-controls"><label class="f"><span>Option</span>${optSel('a', A)}</label><label class="f"><span>Compared with</span>${optSel('b', B)}</label>
+        <label class="f"><span>Number of ${esc(T(A).many)} for both</span><input type="number" inputmode="numeric" step="1" min="0" data-same="n" value="${esc(sameT.n === '' ? n : sameT.n)}"></label></div>
+      <p class="scroll-hint hint">Scroll the table sideways to see every column.</p>
+      <div class="table-wrap" tabindex="0" role="region" aria-label="Two options at the same turnout"><table class="res st-t"><thead><tr><th></th><th>${esc(A.name)}</th><th>${esc(B.name)}</th></tr></thead><tbody>
+        ${labels.map((l, k) => `<tr><th>${esc(l)}</th><td class="wrap">${esc(ca[k])}</td><td class="wrap">${esc(cb[k])}</td></tr>`).join('')}
+      </tbody></table></div>
+      <p class="st-result${r.reason === 'belowPaid' ? ' callout warn-callout' : ''}"><b>${esc(sameTurnoutWords(A, B, r))}</b></p>
+      ${r.sameCount || r.reason === 'belowPaid' ? '' : `<p class="callout warn-callout"><span>The two options end up at different numbers (${r.a.participants} and ${r.b.participants}) because of capacity or whole-group rules, so this is not a like-for-like comparison. Choose a number both can take: up to ${Math.min(E.maxFeasible(A), E.maxFeasible(B))}.</span></p>`}
+      <p class="hint">“More paying people” is what the numbers need, not a forecast. Extra players are counted at each option’s own prices, group deals, minimums and deposit rules.</p></section>`;
+  }
+
+  // Board summary lines for one option: stages, past rounds, reasons for each scenario number.
+  function batch2Lines(o) {
+    const f = E.interestFunnel(state, o), t = T(o), unit = t.survey === 'buy' ? 'items' : t.many, L = [];
+    L.push(`Evidence stage by stage (each its own count, never added): sent ${stageCount(f.contacted)}; answered ${stageCount(f.responses)} (whole survey); named "yes" ${f.named}${f.named && f.offerState !== 'current' ? ' (not counted: offer changed or not recorded)' : ''}; anonymous "yes" ${f.anonymousYes}; "maybe" ${f.maybe}; paid ${f.paid} ${unit}; money received ${f.cashReceived == null ? 'not entered' : money(f.cashReceived)}.`);
+    f.pastRounds.forEach((r) => L.push(`Past round${r.archivedOn ? ` (kept ${showDate(r.archivedOn)})` : ''}, for ${termsWords(r.terms)}: ${r.named} named "yes", ${r.anonymousYes} anonymous "yes", ${r.maybe} "maybe". Not added to current answers.`));
+    const ss = state.scenarioSettings, links = research().links.filter((l) => l.optionId === o.id && SC.includes(l.assumption));
+    L.push(`Scenario numbers are the organizer's choices, not predictions: ${SC.map((k) => `${ss[k].label.toLowerCase()} ${(o.scenarioParticipants || {})[k] ?? 0}`).join(', ')}.${links.length ? ` Reasons: ${links.map((l) => `${ss[l.assumption].label.toLowerCase()}: ${l.note ? `"${l.note}"` : 'no reason written'}`).join('; ')}.` : ' No reasons recorded.'}`);
+    return L;
   }
 
   // ---------- results ----------
@@ -964,6 +1095,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       L.push(`- Contract dates and terms (${unknownCount(ct.items) ? `${unknownCount(ct.items)} still unknown` : 'all entered'}):`);
       ct.items.forEach(([st, text]) => L.push(`  - ${st === 'unknown' ? '[unknown] ' : st === 'late' ? '[date passed or today] ' : ''}${text}`));
       L.push(`  - ${CONTRACT_CAVEAT}`);
+      batch2Lines(o).forEach((l) => L.push(`- ${l}`));
       const rl = researchLines(o);
       if (rl.length) { L.push(`- Research on file (${state.isDemo ? 'fictional; ' : ''}organizer's records; not used in any calculation):`); rl.forEach((l) => L.push(l.startsWith('  ') ? `    - ${l.trim()}` : `  - ${l}`)); }
     }
@@ -973,6 +1105,12 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       au.units.forEach((u) => L.push(`- ${UNIT_LABEL[u.unit]}: ${u.reachSum == null ? 'reach unknown' : `${u.reachSum.toLocaleString('en-US')} estimated reach`} across ${u.groups} group${u.groups === 1 ? '' : 's'}${u.reachUnknown ? ` (${u.reachUnknown} unknown)` : ''}${u.overlaps ? '; some groups overlap' : ''}. Records: ${[u.observations && `${u.observations} sourced`, u.estimates && `${u.estimates} estimates`, u.unrecorded && `${u.unrecorded} without provenance`, u.fictional && `${u.fictional} fictional`].filter(Boolean).join(', ')}; ${u.unchecked} not checked${u.conflicting ? `, ${u.conflicting} conflicting` : ''}.`));
       if (au.fictionalLeftOut) L.push(`- ${au.fictionalLeftOut} fictional group${au.fictionalLeftOut === 1 ? '' : 's'} left out of these totals.`);
       au.warnings.forEach((w) => L.push(`- ${w}`));
+    }
+    if (state.options.length >= 2) {
+      const st = sameTurnout();
+      L.push('', '## Same turnout comparison');
+      if (!st.r.comparable) L.push(`- ${sameTurnoutWords(st.A, st.B, st.r)}`);
+      else L.push(`_${st.A.name} and ${st.B.name}, both at ${st.n} ${T(st.A).many}; firm money only. It assumes neither format brings more people or a higher price._`, `- Total costs: ${st.A.name} ${money(st.r.a.expenses)} (${st.r.a.participants}); ${st.B.name} ${money(st.r.b.expenses)} (${st.r.b.participants}). Firm money left: ${money(st.r.a.net)} and ${money(st.r.b.net)}.`, `- ${sameTurnoutWords(st.A, st.B, st.r)}`);
     }
     L.push('', '## Before anyone signs'); SIGNING_QUESTIONS.forEach((q) => L.push(`- [ ] ${q}`));
     L.push('', '_Planning estimates only. No guarantee of results; no tax or legal determinations._');
@@ -1330,6 +1468,8 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <dl class="statuses">${Object.keys(STATUS_MEANING).map((k) => `<dt><span class="badge ${statusClass(k)}"><i aria-hidden="true">${statusIcon(k)}</i>${esc(E.STATUS_LABELS[k])}</span></dt><dd>${esc(STATUS_MEANING[k])}</dd>`).join('')}</dl>
         <p><b>Firm money</b> means ticket or sales money plus sponsorship that is collected or promised in writing. Break-even uses only firm money. Add-ons, “other income” and auction or raffle estimates appear in the low, likely and high cases, labeled as your assumptions.</p>
         <p><b>What would need to change?</b> Pick an option and a number to see how much more firm sponsorship would cover costs or reach your goal, and how many people would, but only when more people actually help. You can compare prices you type in at the same number. It can’t know whether people would still come at a different price. Nothing changes your plan unless you choose <b>Use … in my plan</b> and confirm.</p>
+        <p><b>What did supporters say?</b> shows each option’s evidence stage by stage: sent, answered, “yes” with a name, anonymous “yes”, “maybe”, paid and money received. They are never added together. If you change the offer and ask again, choose <b>Keep these answers as a past round</b> first: the old answers are kept with the offer they were for, and paid sign-ups and money stay as they are.</p>
+        <p><b>Low, likely and high numbers</b> are your scenarios, not predictions. Say why under each one (it opens a note on the Research page). <b>Capacity shortcuts</b> preview 50%, 75% and 100% of capacity; nothing changes until you choose “Use … as …” and confirm. On the results page, <b>Compare two options at the same turnout</b> shows what a costlier format (such as a shotgun start) would take in extra firm sponsorship or extra paying players, without assuming it draws more people.</p>
         <p><b>Research</b> (optional, from the menu): keep audience sizes and similar events’ prices with their sources, and note which research supports an assumption. It never changes a number, a status or your survey totals. Each record says where it comes from (sourced, your estimate, or fictional) and whether you checked it. Unknown stays unknown, groups in different units are never added together, and similar events are listed side by side with no combined price range; nothing is a recommended price.</p>
         <p><b>Contract dates and terms</b> (entered on the quote step) show as unknown until you fill them in. They never change the numbers, and the planner can’t remind you when it’s closed.</p>
         <p>To share with the board, use <b>Copy board summary</b> (paste into an email) or <b>Print</b>.</p>
@@ -1381,6 +1521,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       </header>
       <section class="panel" aria-label="Answers for each option">${renderSummary(all)}</section>
       ${renderWhatIf()}
+      ${sameTurnoutPanel()}
       ${state.options.length > 1 ? `<section class="panel"><h2>Side by side</h2>${renderComparison(all)}</section>` : ''}
       <section class="panel"><h2>Before anyone signs</h2><p class="hint">These can change the decision but can't be calculated. Get answers in writing.</p><ul class="plain miss">${SIGNING_QUESTIONS.map((q) => `<li>${esc(q)}</li>`).join('')}</ul>
         ${state.options.map((o) => `<details class="qs"><summary>Questions to ask the ${esc(T(o).venue)}: ${esc(o.name)}</summary><ul class="plain">${questionsFor(o).map((q) => `<li>${esc(q)}</li>`).join('')}</ul></details>`).join('')}</section>
@@ -1423,6 +1564,8 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       state.scenarioSettings[k].statuses = E.SPONSOR_STATUSES.filter((s) => set.has(s));
       return renderKeepingFocus();
     }
+    if (t.dataset.shortcut === 'target') { shortcutTarget = SC.includes(t.value) ? t.value : 'middle'; return renderKeepingFocus(); }
+    if (t.dataset.same) { sameT[t.dataset.same] = t.value; if (t.dataset.same !== 'n' && sameT.a && sameT.a === sameT.b) sameT[t.dataset.same === 'a' ? 'b' : 'a'] = ''; return renderKeepingFocus(); }
     if (t.dataset.researchToggle) { // research id lists (overlaps, options, cited records): add or remove one id
       const list = getPath(state, t.dataset.researchToggle);
       const next = (Array.isArray(list) ? list : []).filter((x) => x !== t.value);
@@ -1481,9 +1624,11 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     if (!el || el === document.body || !document.getElementById('app').contains(el)) return null;
     if (el.dataset.path) return `[data-path="${CSS.escape(el.dataset.path)}"]`;
     if (el.dataset.whatif) return `[data-whatif="${CSS.escape(el.dataset.whatif)}"]`;
+    if (el.dataset.shortcut) return `[data-shortcut="${CSS.escape(el.dataset.shortcut)}"]`;
+    if (el.dataset.same) return `[data-same="${CSS.escape(el.dataset.same)}"]`;
     if (el.dataset.researchToggle) return `[data-research-toggle="${CSS.escape(el.dataset.researchToggle)}"][value="${CSS.escape(el.value)}"]`;
     if (el.dataset.scenarioStatus) return `[data-scenario-status="${CSS.escape(el.dataset.scenarioStatus)}"][value="${CSS.escape(el.value)}"]`;
-    if (el.dataset.action) return `[data-action="${CSS.escape(el.dataset.action)}"]` + (el.dataset.i != null ? `[data-i="${CSS.escape(el.dataset.i)}"]` : '') + (el.dataset.k != null ? `[data-k="${CSS.escape(el.dataset.k)}"]` : '') + (el.dataset.j != null ? `[data-j="${CSS.escape(el.dataset.j)}"]` : '') + (el.dataset.key ? `[data-key="${CSS.escape(el.dataset.key)}"]` : '');
+    if (el.dataset.action) return `[data-action="${CSS.escape(el.dataset.action)}"]` + (el.dataset.i != null ? `[data-i="${CSS.escape(el.dataset.i)}"]` : '') + (el.dataset.k != null ? `[data-k="${CSS.escape(el.dataset.k)}"]` : '') + (el.dataset.pct != null ? `[data-pct="${CSS.escape(el.dataset.pct)}"]` : '') + (el.dataset.j != null ? `[data-j="${CSS.escape(el.dataset.j)}"]` : '') + (el.dataset.key ? `[data-key="${CSS.escape(el.dataset.key)}"]` : '');
     if (el.id) return '#' + CSS.escape(el.id);
     return null;
   }
@@ -1509,11 +1654,49 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     else if (a === 'confirm-terms') { if (!armed(b, 'Only if you asked supporters about this exact offer. Click again')) return; state.evidence.offerTerms = state.evidence.offerTerms || {}; state.evidence.offerTerms[state.options[i].id] = E.offerTerms(state.options[i], state.snapshot); say('Recorded: these answers are for the current offer.'); }
     else if (a === 'add-option') { const o = clone(window.BFDemo.BLANK_STATE.options[0]); o.id = uid('opt_'); o.name = 'New option'; state.options.push(o); openOption = state.options.length - 1; }
     else if (a === 'dup-option') { const o = clone(state.options[i]); o.id = uid('opt_'); o.name += ' (copy)'; state.options.push(o); openOption = state.options.length - 1; }
-    else if (a === 'del-option') { if (!armed(b, 'Click again to remove')) return; state.options.splice(i, 1); openOption = 0; }
+    else if (a === 'del-option') {
+      if (!armed(b, 'Click again to remove')) return;
+      state.options.splice(i, 1); openOption = 0;
+      // Its survey and payment counts stay in the file (nothing is erased) but count for nothing; the plan stays readable.
+      say('Option removed. Its survey answers and payment numbers stay in your saved file but no longer count, and sponsors tied only to it now count for no option.');
+    }
     else if (a === 'fill-evidence') {
       const o = state.options[i], d = E.decide(state, o);
       o.scenarioParticipants.conservative = d.paid;
       o.scenarioParticipants.middle = d.paid + d.namedCounted; // stale or unrecorded answers don't count
+    }
+    else if (a === 'archive-round') {
+      const o = state.options[i]; if (!o) return;
+      if (!armed(b, 'Move these answers to a past round? Paid sign-ups and money stay. Click again')) return;
+      const ev = state.evidence;
+      if (!ev.offerHistory || typeof ev.offerHistory !== 'object' || Array.isArray(ev.offerHistory)) ev.offerHistory = {};
+      if (!Array.isArray(ev.offerHistory[o.id])) ev.offerHistory[o.id] = [];
+      const g = (k) => Math.max(0, Math.floor(Number((ev[k] || {})[o.id]) || 0));
+      const terms = (ev.offerTerms || {})[o.id];
+      ev.offerHistory[o.id].push({ id: uid('rnd_'), archivedOn: localYMD(), terms: terms ? { ...terms } : null, named: g('namedHighIntent'), definitely: g('surveyDefinitelyAtPrice'), probably: g('surveyProbablyAtPrice'),
+        surveyResponses: ev.surveyResponses == null || ev.surveyResponses === '' ? null : ev.surveyResponses, surveyContacted: ev.surveyContacted == null || ev.surveyContacted === '' ? null : ev.surveyContacted });
+      ['namedHighIntent', 'surveyDefinitelyAtPrice', 'surveyProbablyAtPrice'].forEach((k) => { if (ev[k] && typeof ev[k] === 'object') ev[k][o.id] = 0; });
+      if (ev.offerTerms) delete ev.offerTerms[o.id];
+      if (ev.surveyIssuedTerms) delete ev.surveyIssuedTerms[o.id]; // that survey described the old offer
+      openRecords.add('rounds-' + o.id);
+      say(`${o.name}: answers kept as a past round. Enter the new answers when supporters reply about the current offer. Paid sign-ups and money received did not change. The whole-survey totals stay as they are: update them if you send a new survey.`);
+    }
+    else if (a === 'add-scenario-reason') {
+      const o = state.options[i], k = b.dataset.k; if (!o || !SC.includes(k)) return;
+      const r = ensureResearch(), id = uid('lnk_');
+      r.links.push({ id, optionId: o.id, assumption: k, researchIds: [], note: '' });
+      openRecords.add(id); touched = true; persist();
+      return go('research');
+    }
+    else if (a === 'apply-shortcut') {
+      const o = state.options[i]; if (!o) return;
+      const sc = E.capacityShortcuts(state, o, shortcutTarget), r = sc.rows.find((x) => x.pct === +b.dataset.pct);
+      if (!r || r.belowPaid) return;
+      const label = state.scenarioSettings[sc.scenario].label;
+      if (!armed(b, `Set your ${label} number to ${r.participants}? Click again`)) return;
+      o.scenarioParticipants[sc.scenario] = r.participants; // the same engine call as the preview, so the result is the preview
+      const after = E.project(o, o.scenarioParticipants[sc.scenario], E.scenarioContext(state, o, sc.scenario)).net;
+      say(`${label} number set to ${r.participants} (${r.pct}% of capacity). Money left in that case: ${money(after)}${after === r.net ? ', as previewed' : ` (the preview said ${money(r.net)}: please report this)`}. It is your scenario, not a prediction; say why under “Why this number”.`);
     }
     else if (a === 'add-research') {
       const r = ensureResearch(), k = b.dataset.kind;
@@ -1650,18 +1833,25 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     const ss = s.scenarioSettings;
     if (!isObj(ss) || !['conservative', 'middle', 'optimistic'].every((k) => isObj(ss[k]) && Array.isArray(ss[k].statuses) && ss[k].statuses.every((x) => E.SPONSOR_STATUSES.includes(x)) && ['extraRevenuePerParticipant', 'otherRevenue', 'costContingencyPct'].every((f) => isNum(ss[k][f])) && isStr(ss[k].label))) p.push('Scenario settings are missing or incomplete.');
     if (!Array.isArray(s.sponsorships)) p.push('Sponsorships must be a list.');
-    else if (s.sponsorships.some((x) => !isObj(x) || !isNum(x.amount) || !E.SPONSOR_STATUSES.includes(x.status) || !['cash', 'inKind'].includes(x.type) || !isStr(x.label) || (x.optionId && !ids.has(x.optionId)) || (x.replacesCostId && !SAFE_ID.test(String(x.replacesCostId))) || (x.id != null && !SAFE_ID.test(String(x.id))))) p.push('A sponsorship has a bad amount, status, type or link.');
+    else if (s.sponsorships.some((x) => !isObj(x) || !isNum(x.amount) || !E.SPONSOR_STATUSES.includes(x.status) || !['cash', 'inKind'].includes(x.type) || !isStr(x.label) || (x.optionId && !SAFE_ID.test(String(x.optionId))) || (x.replacesCostId && !SAFE_ID.test(String(x.replacesCostId))) || (x.id != null && !SAFE_ID.test(String(x.id))))) p.push('A sponsorship has a bad amount, status, type or link.');
     const ev = s.evidence;
     if (!isObj(ev)) p.push('Survey and payment evidence is missing.');
     else {
       if (!isNum(ev.surveyResponses)) p.push('The number of survey responses must be a number.');
       ['paidRegistrations', 'paidCashReceived', 'namedHighIntent', 'surveyDefinitelyAtPrice', 'surveyProbablyAtPrice'].forEach((k) => {
         if (ev[k] == null) return;
-        if (!isObj(ev[k]) || Object.entries(ev[k]).some(([id, v]) => !ids.has(id) || !isNum(v))) p.push(`Evidence "${k}" must hold numbers for this plan's options only.`);
+        // Entries for an option that was deleted are kept and ignored (row 86); they must still be safe ids and numbers.
+        if (!isObj(ev[k]) || Object.entries(ev[k]).some(([id, v]) => !SAFE_ID.test(id) || !isNum(v))) p.push(`Evidence "${k}" must hold numbers for the plan's options.`);
       });
+      if (!isNum(ev.surveyContacted)) p.push('The number of people the survey was sent to must be a number.');
+      // Past rounds (row 87): per option, a list of kept answers with the offer they were for.
+      if (ev.offerHistory != null && (!isObj(ev.offerHistory) || Object.entries(ev.offerHistory).some(([id, list]) => !SAFE_ID.test(id) || !Array.isArray(list) || list.some((r) => !isObj(r)
+        || (r.id != null && !SAFE_ID.test(String(r.id))) || !['named', 'definitely', 'probably', 'surveyResponses', 'surveyContacted'].every((f) => isNum(r[f]))
+        || !(r.archivedOn == null || r.archivedOn === '' || E.isCalendarDate(r.archivedOn))
+        || !(r.terms == null || (isObj(r.terms) && Object.values(r.terms).every((v) => v == null || ['string', 'number'].includes(typeof v)))))))) p.push('Past survey rounds are not readable.');
       ['offerTerms', 'surveyIssuedTerms'].forEach((k) => {
         if (ev[k] == null) return;
-        if (!isObj(ev[k]) || Object.entries(ev[k]).some(([id, t]) => !ids.has(id) || !isObj(t) || Object.values(t).some((v) => v != null && !['string', 'number'].includes(typeof v)))) p.push(`Evidence "${k}" is not readable.`);
+        if (!isObj(ev[k]) || Object.entries(ev[k]).some(([id, t]) => !SAFE_ID.test(id) || !isObj(t) || Object.values(t).some((v) => v != null && !['string', 'number'].includes(typeof v)))) p.push(`Evidence "${k}" is not readable.`);
       });
     }
     if (!isObj(s.settings) || !isNum(s.settings.fundraisingTarget) || !isNum(s.settings.volunteerHourValue)) p.push('Plan settings are missing or not numbers.');
@@ -1777,7 +1967,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   });
   document.addEventListener('click', onClick);
   // Remember which research records are open, so re-drawing the page after an edit keeps them open.
-  document.addEventListener('toggle', (e) => { const d = e.target; if (d && d.matches && d.matches('details[data-rec]')) { if (d.open) openRecords.add(d.dataset.rec); else openRecords.delete(d.dataset.rec); } }, true);
+  document.addEventListener('toggle', (e) => { const d = e.target; if (!d || !d.matches) return; const key = d.matches('details[data-rec]') ? d.dataset.rec : d.matches('details[data-keep]') ? d.dataset.keep : null; if (key) { if (d.open) openRecords.add(key); else openRecords.delete(key); } }, true);
   // Printing: open every collapsed detail section so the printout is complete, then put them back.
   let printOpened = [];
   // Add to the list rather than replace it: if a second beforeprint arrives first, the first one's sections still close.
