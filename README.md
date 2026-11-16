@@ -41,6 +41,7 @@ python3 test/ui_whatif.py      # browser: what would need to change, applying a 
 python3 test/ui_research.py    # browser: research records, provenance, side-by-side events, safe links, backups, malformed files
 python3 test/ui_scenarios.py   # browser: evidence stages, past rounds, scenario reasons, capacity shortcuts, same-turnout comparison
 python3 test/ui_option_delete.py # browser: removing an option keeps the plan readable after a reload
+python3 test/ui_ready.py        # browser: "Ready to commit?" criteria, evidence, next steps, board summary and print
 python3 test/ui_journey.py     # browser: full session, reload, backup file, restore, print, widths, dark mode
 ```
 Optional: pass a folder to `ui_smoke.py` or `ui_journey.py` to save screenshots (and a print PDF from the journey).

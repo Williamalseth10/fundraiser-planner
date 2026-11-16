@@ -233,6 +233,15 @@ ul.standing li.no { color: var(--text-2); }
 ul.standing li.late, ul.standing li.late > span:first-child { color: var(--warn); font-weight: 700; }
 .contract { border-top: 1px solid var(--border); margin-top: 10px; }
 .contract h4 { font-size: 16px; margin: 14px 0 4px; }
+.ready { border-top: 1px solid var(--border); margin-top: 14px; padding-top: 4px; }
+.ready h3 { margin: 10px 0 2px; }
+.ready h4 { font-size: 16px; margin: 12px 0 4px; }
+.ready-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 28px; }
+@media (max-width: 760px) { .ready-grid { grid-template-columns: minmax(0, 1fr); } }
+ul.standing li.bad, ul.standing li.bad > span:first-child { color: var(--bad); }
+ul.standing.crit li > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+ol.next { margin: 6px 0; padding-left: 22px; } ol.next li { margin: 4px 0; }
+.printonly { display: none; }
 .whatif .wi-controls, .whatif .wi-prices { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .whatif .wi-price { display: grid; gap: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
 .whatif .wi-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); }
@@ -298,6 +307,8 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
   .demo { border: 1px solid #000; }
   .panel { border: 0; padding: 0; margin-bottom: 12pt; }
   .card, .aloud, tr, ul.standing li, .verify li { break-inside: avoid; }
+  .printonly { display: block !important; }
+  ol.next li, .ready h4 { break-inside: avoid; break-after: avoid; }
   .sum + .sum { break-before: page; border: 0; }
   .table-wrap { overflow: visible; }
   table.res th:first-child, table.res td:first-child { position: static; }

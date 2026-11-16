@@ -708,7 +708,130 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     L.push(`Evidence stage by stage (each its own count, never added): sent ${stageCount(f.contacted)}; answered ${stageCount(f.responses)} (whole survey); named "yes" ${f.named}${f.named && f.offerState !== 'current' ? ' (not counted: offer changed or not recorded)' : ''}; anonymous "yes" ${f.anonymousYes}; "maybe" ${f.maybe}; paid ${f.paid} ${unit}; money received ${f.cashReceived == null ? 'not entered' : money(f.cashReceived)}.`);
     f.pastRounds.forEach((r) => L.push(`Past round${r.archivedOn ? ` (kept ${showDate(r.archivedOn)})` : ''}, for ${termsWords(r.terms)}: ${r.named} named "yes", ${r.anonymousYes} anonymous "yes", ${r.maybe} "maybe". Not added to current answers.`));
     const ss = state.scenarioSettings, links = research().links.filter((l) => l.optionId === o.id && SC.includes(l.assumption));
-    L.push(`Scenario numbers are the organizer's choices, not predictions: ${SC.map((k) => `${ss[k].label.toLowerCase()} ${(o.scenarioParticipants || {})[k] ?? 0}`).join(', ')}.${links.length ? ` Reasons: ${links.map((l) => `${ss[l.assumption].label.toLowerCase()}: ${l.note ? `"${l.note}"` : 'no reason written'}`).join('; ')}.` : ' No reasons recorded.'}`);
+    L.push(`Scenario numbers are the organizer's choices, not predictions: ${SC.map((k) => `${ss[k].label.toLowerCase()} ${notEntered((o.scenarioParticipants || {})[k]) ? 'not entered' : (o.scenarioParticipants || {})[k]}`).join(', ')}.${links.length ? ` Reasons: ${links.map((l) => `${ss[l.assumption].label.toLowerCase()}: ${l.note ? `"${l.note}"` : 'no reason written'}`).join('; ')}.` : ' No reasons recorded.'}`);
+    return L;
+  }
+
+
+  // ---------- "Ready to commit?" (Batch 3, row 90): criteria, what we know, what is uncertain, what to do next ----------
+  // One set of words for the screen, the board summary and print, so their conclusions can't differ.
+  const READY_MARK = { met: ['✓', 'Met', 'yes'], unmet: ['✕', 'Not met', 'bad'], unknown: ['?', 'Unknown', 'no'], timing: ['•', 'Timing', 'no'] };
+  const lossWords = (net) => (net < 0 ? `a loss of ${hm(-net)}` : `${hm(net)}, so no loss`);
+  function readyWords(o, r) {
+    const t = T(o), many = t.many, buy = t.survey === 'buy', cr = state.criteria || {};
+    const [mn, ml, vo, db] = r.criteria;
+    const crit = [], lk = r.likely;
+    // Why the likely number can't be used (row 91). The numbers are shown as entered; nothing is raised.
+    const FLAG = { over_capacity: `capped at the capacity of ${lk.capacity}`, rounded_down_to_whole_groups: `rounded down to whole ${t.groupName || 'group'}s`, fewer_than_already_paid: `fewer than the ${lk.paid} already paid`, negative_input_set_to_zero: 'a negative number was set to 0' };
+    const words = (fl) => fl.map((f) => FLAG[f] || f.replace(/_/g, ' ')).join('; ');
+    const lkWarn = lk.warnings.length ? ` (${words(lk.warnings)})` : '';
+    const counted = lk.known && lk.requested !== lk.participants ? `${lk.requested}, counted as ${lk.participants}${lk.warnings.some((f) => f !== 'fewer_than_already_paid') ? `: ${words(lk.warnings.filter((f) => f !== 'fewer_than_already_paid'))}` : ''}` : `${lk.requested}`;
+    const conflictText = lk.conflict === 'likelyMissing' ? 'your likely number is not entered'
+      : lk.conflict === 'capacityBelowPaid' ? `the capacity entered (${lk.capacity}) is below the ${lk.paid} ${many} already paid`
+        : lk.conflict === 'likelyBelowPaid' ? `your likely number (${counted}) is below the ${lk.paid} ${many} already paid` : '';
+    // 1. Minimum net proceeds (firm money, at the likely number).
+    const basis = `firm money (${buy ? 'sales' : 'ticket money'} plus sponsorship collected or promised in writing), at your likely number of ${mn.participants} ${many}`;
+    crit.push([mn.result, mn.conflict
+      ? `Smallest amount worth raising: ${mn.threshold == null ? 'not set' : hm(mn.threshold)}. Can’t be judged: ${conflictText}.`
+      : mn.result === 'unknown'
+      ? `Smallest amount worth raising: not set. On ${basis}, it would leave ${hm(mn.value)}.`
+      : `Smallest amount worth raising: ${hm(mn.threshold)}. On ${basis}, it leaves ${hm(mn.value)}.${mn.lowConflict === 'lowMissing' ? ' Your low number is not entered.' : mn.lowConflict === 'lowBelowPaid' ? ` Your low number (${mn.lowRequested}${mn.lowParticipants !== mn.lowRequested ? `, counted as ${mn.lowParticipants}` : ''}) is below the ${lk.paid} ${many} already paid, so its figure isn’t shown.` : ` At your low number (${mn.lowParticipants}) it leaves ${hm(mn.lowValue)}${mn.lowMeets ? '' : ', below this amount'}.`}${lkWarn ? ` Your likely number was ${lk.requested}, counted as ${lk.participants}${lkWarn}.` : ''}`]);
+    // 2. Largest acceptable loss, two named exposures.
+    const [cx, lx] = ml.parts;
+    const within = (q) => (ml.threshold == null || q.result === 'unknown' ? '' : q.result === 'met' ? ' (within the limit)' : ' (over the limit)');
+    const cancelText = cx.loss == null ? 'if you cancel after the deadline: unknown, because the cancellation terms are not entered' : `if you cancel after the deadline: ${hm(cx.loss)} owed and already spent${within(cx)}`;
+    const runText = lx.conflict ? `if you hold it and few come: can’t be judged, because the capacity entered (${lk.capacity}) is below the ${lk.paid} ${many} already paid`
+      : `if you hold it and few come: the lowest firm-money result at ${lx.participants} ${many} or more is ${lossWords(lx.net)}${within(lx)}`;
+    crit.push([ml.result, `${ml.threshold == null ? 'Largest loss the club could accept: not set' : `Largest loss the club could accept: ${hm(ml.threshold)}`}. Exposure ${cancelText}; ${runText}.`]);
+    // 3. Volunteer hours (no dollar value).
+    crit.push([vo.result, vo.need == null ? 'Volunteer hours: the hours this option needs are not entered.'
+      : vo.available == null ? `Volunteer hours: about ${vo.need} needed; hours available are not entered.`
+        : `Volunteer hours: about ${vo.need} needed, ${vo.available} available${vo.result === 'met' ? '' : `, ${Math.round((vo.need - vo.available) * 10) / 10} short`}.${vo.need === 0 ? ' You entered 0 hours needed: check that is right.' : ''}`]);
+    // 4. Decision deadline (timing only).
+    const rel = db.days == null ? '' : db.days === 0 ? ' (today)' : db.days > 0 ? ` (in ${db.days} day${db.days === 1 ? '' : 's'})` : ` (${-db.days} day${db.days === -1 ? '' : 's'} ago)`;
+    crit.push([db.result, !db.date ? 'Decide by: not set.' : `Decide by: ${showDate(db.date)}${rel}.${db.timing === 'passed' ? ' The date has passed. That is timing, not a sign the event will or won’t work.' : ''}`, db.timing === 'passed' || db.timing === 'today']);
+
+    // What we know (each fact on its own).
+    const a = r.attendance, cash = r.cash, k = r.contract, know = [];
+    const paidW = buy ? `${a.paid} ${many} paid for` : `${a.paid} ${a.paid === 1 ? t.one : many} paid`;
+    const namedW = `${a.namedCounted} named “yes” for the current offer (not payment)`;
+    know.push(a.conflict ? `Attendance: can’t be compared, because ${conflictText}. Paid sign-ups and money received are shown as entered: ${paidW}.`
+      : a.coveredBy === 'none' ? `Attendance: your likely number is 0 ${many}, as you entered it. ${cap(paidW)}.`
+      : a.coveredBy === 'paid' ? `Attendance: your likely number is ${a.likely} ${many}. ${cap(paidW)}, which already reaches it.`
+      : a.coveredBy === 'paidAndNamed' ? `Attendance: your likely number is ${a.likely} ${many}. ${cap(paidW)} and ${namedW} reach it together. That is a count, not a prediction.`
+        : `Attendance: your likely number is ${a.likely} ${many}. ${cap(paidW)} and ${namedW} make ${a.paid + a.namedCounted}, ${a.likely - a.paid - a.namedCounted} short of it. The likely number is your assumption, not evidence.`);
+    if (a.named > a.namedCounted) know.push(`${a.named - a.namedCounted} named “yes” answers were for different or unrecorded terms and aren’t counted.`);
+    if (a.anonymousYes) know.push(`${a.anonymousYes} anonymous “yes” answers are shown but not counted.`);
+    know.push(`Cash: ${hm(cash.neededBeforeEvent)} is needed before the event; ${hm(cash.inHand)} is in hand (collected sponsorship and money actually received)${cash.registrationCashUnknown ? ', not counting money received from people who paid, which isn’t entered' : ''}. ${cash.short > 0 ? `Short by ${hm(cash.short)}${cash.fundingConfirmed ? ' (the club confirmed it can cover this)' : ' (not yet covered)'}.` : 'No shortfall.'}${cash.committedSponsorship ? ` ${hm(cash.committedSponsorship)} promised in writing counts in firm money but isn’t cash yet.` : ''}${cash.hopedSponsorship ? ` ${hm(cash.hopedSponsorship)} hoped-for isn’t counted.` : ''}`);
+    know.push(`Contract: ${k.quoteVerified ? `${t.venue} quote in writing` : `${t.venue} quote not in writing yet`}; ${k.costsVerified ? 'other costs are quotes' : 'other costs are estimates'}; cancellation terms ${k.cancellationKnown ? 'entered' : 'unknown'}.${k.next ? ` Next date: ${contractLabel(o, k.next.key)}, ${dateWords(k.next)}.` : ''}`);
+
+    // What remains uncertain: the existing must-verify list plus attendance and contract dates.
+    const unsure = [...r.missing];
+    if (lk.conflict === 'likelyMissing') unsure.push('Your likely number is not entered, so nothing that depends on it can be judged.');
+    if (mn.lowConflict === 'lowBelowPaid' && lk.conflict !== 'capacityBelowPaid') unsure.push(`The numbers conflict: your low number (${mn.lowRequested}) is below the ${lk.paid} ${many} already paid.`);
+    if (lk.conflict === 'likelyBelowPaid') unsure.push(`The numbers conflict: ${conflictText}.`); // a capacity below the paid count is already in the must-verify list
+    if (a.coveredBy === 'notCovered') unsure.push(`Whether ${a.likely} ${many} will actually ${buy ? 'be bought' : 'come and pay'}: paid plus named “yes” is ${a.paid + a.namedCounted}.`);
+    if (!a.reasonRecorded && lk.known) unsure.push('No reason is recorded for your likely number. Add one on the “Plan for low, likely and high” step.');
+    const dates = k.unresolved.filter((u) => !/owed if you cancel/i.test(u));
+    if (dates.length) unsure.push(`Contract details not entered: ${dates.join(', ')}.`);
+    if (k.passed.length) unsure.push(`Contract dates passed or due today: ${k.passed.join(', ')}. Check with the ${t.venue} what this means now.`);
+
+    // What to do next.
+    const next = r.actions.map((key) => ({
+      enterLikely: 'Enter your likely number on the “Plan for low, likely and high” step. Blank is treated as unknown, not 0.',
+      resolveConflict: lk.conflict === 'capacityBelowPaid'
+        ? `Check the capacity with the ${t.venue} and the paid count in your records: ${lk.paid} are paid but the capacity entered is ${lk.capacity}. The planner won’t change either number for you.`
+        : `Fix the likely number or the paid count: ${lk.paid} ${many} are already paid, so the likely number can’t be lower. The planner won’t raise it for you.`,
+      resolveLow: `Fix the low number or the paid count: ${lk.paid} ${many} are already paid, so the low number can’t be lower. The planner won’t raise it for you.`,
+      quote: k.quoteVerified
+        ? `Get the missing contract details from the ${t.venue} in writing: ${[!k.cancellationKnown && 'what you would owe if you cancel', ...dates.map((x) => x.toLowerCase())].filter(Boolean).join(', ')}.`
+        : `Get the written ${t.venue} quote${k.cancellationKnown ? '' : ', including what you would owe if you cancel'}${dates.length ? `, and these details: ${dates.join(', ').toLowerCase()}` : ''}.`,
+      reconfirm: a.evidenceState === 'stale' || a.evidenceState === 'unrecorded' ? 'Re-ask supporters about the current offer (price, date, what’s included), or confirm their answers still apply.' : `Collect paid sign-ups or named “yes” answers for the current offer before relying on ${a.likely} ${many}.`,
+      cash: `Agree how the club will cover the ${hm(cash.short)} due before the event, and have the treasurer confirm it.`,
+      adjust: 'Adjust the price, costs or scope until the numbers meet your criteria. “What would need to change?” in the planner can test this.',
+      volunteers: vo.result === 'unmet' ? `Find about ${Math.round((vo.need - vo.available) * 10) / 10} more volunteer hours, or reduce the scope.` : 'Confirm how many volunteer hours people can actually give.',
+      setCriteria: `Agree with the board on ${[mn.threshold == null && 'the smallest amount worth raising', ml.threshold == null && 'the largest loss the club could accept'].filter(Boolean).join(' and ')}.`,
+      deadline: 'Your decide-by date has passed or is today. Confirm the real deadline with the board and the venue.',
+      board: 'Take this summary, with the open items above, to the board. The board decides: this planner doesn’t approve contracts or predict turnout.',
+    })[key]);
+    return { crit, know, unsure, next };
+  }
+  const READY_CAVEAT = 'Meeting a criterion in a scenario doesn’t mean people will come, and it doesn’t make a contract safe. Firm money counts promised sponsorship that isn’t cash yet.';
+  function readyCard(o) {
+    const r = E.readiness(state, o, localYMD()), w = readyWords(o, r);
+    const li = ([res, text, late]) => { const [icon, word, cls] = READY_MARK[res]; return `<li class="${late ? 'late' : cls}"><span aria-hidden="true">${icon}</span><span><b>${word}:</b> ${esc(text)}</span></li>`; };
+    return `<article class="ready" data-ready="${esc(o.id)}" aria-labelledby="ready-${esc(o.id)}"><h3 id="ready-${esc(o.id)}">${esc(o.name)}</h3>
+      <div class="ready-grid">
+        <section><h4>What the numbers require</h4><ul class="standing crit">${w.crit.map(li).join('')}</ul></section>
+        <section><h4>What we know</h4><ul class="plain">${w.know.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></section>
+        <section><h4>What remains uncertain</h4>${w.unsure.length ? `<ul class="plain miss">${w.unsure.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="hint">Nothing flagged from what you entered.</p>'}</section>
+        <section><h4>What to do next</h4><ol class="next">${w.next.map((x) => `<li>${esc(x)}</li>`).join('')}</ol></section>
+      </div></article>`;
+  }
+  function criteriaLine() {
+    const cr = state.criteria || {}, v = (x) => (x == null || x === '' ? 'not set' : hm(x));
+    return `Decision criteria: smallest amount worth raising ${v(cr.minNet)}; largest loss the club could accept ${v(cr.maxLoss)}; volunteer hours available ${state.volunteerHoursAvailable == null || state.volunteerHoursAvailable === '' ? 'not entered' : state.volunteerHoursAvailable}; decide by ${E.isCalendarDate(cr.decideBy) ? showDate(cr.decideBy) : 'not set'}.`;
+  }
+  function readySection() {
+    return `<section class="panel ready-panel" aria-labelledby="ready-title"><h2 id="ready-title">Ready to commit?</h2>
+      <p class="hint">Your own limits, checked against each option. Blank means not decided yet; 0 is a real answer. Nothing here signs or approves anything.</p>
+      <div class="fields noprint">
+        ${num('criteria.minNet', 'Smallest amount after costs that makes this worth doing ($)', { placeholder: 'not set', help: 'Checked against firm money at your likely number.' })}
+        ${num('criteria.maxLoss', 'Largest loss the club could accept ($)', { placeholder: 'not set', help: 'Checked against canceling after the deadline and against holding it with low turnout.' })}
+        ${num('volunteerHoursAvailable', 'Volunteer hours your club can realistically give', { placeholder: 'not sure' })}
+        ${dateIn('criteria.decideBy', 'Decide by', 'A date for the board’s decision. Timing only.')}
+      </div>
+      <p class="printonly">${esc(criteriaLine())}</p>
+      ${state.options.map(readyCard).join('')}
+      <p class="hint">${esc(READY_CAVEAT)}</p></section>`;
+  }
+  function readyMemoLines(o) {
+    const w = readyWords(o, E.readiness(state, o, localYMD())), L = ['', '### Ready to commit?', '**What the numbers require**'];
+    w.crit.forEach(([res, text]) => L.push(`- [${READY_MARK[res][1]}] ${text}`));
+    L.push('', '**What we know**'); w.know.forEach((x) => L.push(`- ${x}`));
+    L.push('', '**What remains uncertain**'); (w.unsure.length ? w.unsure : ['Nothing flagged from what was entered.']).forEach((x) => L.push(`- ${x}`));
+    L.push('', '**What to do next**'); w.next.forEach((x, i) => L.push(`${i + 1}. ${x}`));
+    L.push('');
     return L;
   }
 
@@ -752,6 +875,20 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   };
   function statusIcon(s) { return { not_enough_evidence: '?', not_viable_as_configured: '✕', high_risk: '!', supported_with_open_items: '…', supported_by_current_evidence: '✓' }[s]; }
 
+  // A scenario number left blank (row 92). The engine still counts it as 0 people, as it always has; everywhere a status
+  // or a figure depends on it, the screen and the board summary say it was not entered, so it never reads as a typed 0.
+  const SC_WORD = { conservative: 'low', middle: 'likely', optimistic: 'high' };
+  const notEntered = (v) => v == null || v === '' || !Number.isFinite(Number(v));
+  const blankScenarios = (o) => SC.filter((k) => notEntered((o.scenarioParticipants || {})[k]));
+  const andList = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+  function blankNote(o) {
+    const b = blankScenarios(o);
+    if (!b.length) return '';
+    const names = andList(b.map((k) => SC_WORD[k])), many = T(o).many, it = b.length > 1 ? 'them' : 'it';
+    return `Not entered: your ${names} number${b.length > 1 ? 's' : ''}. ${b.includes('conservative') ? 'The status and the' : 'The status doesn’t use it, but the'} ${names}-case figures count ${it} as 0 ${many}, which you didn’t enter. Enter ${it} on the “Plan for low, likely and high” step.`;
+  }
+  const scenarioNet = (o, k, p) => (notEntered((o.scenarioParticipants || {})[k]) ? `not entered (counted as 0: ${hm(p.net)})` : hm(p.net));
+
   function analyse(o) {
     const proj = {};
     SC.forEach((k) => { proj[k] = E.project(o, (o.scenarioParticipants || {})[k], E.scenarioContext(state, o, k)); });
@@ -766,11 +903,11 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       <thead><tr><th>Option</th><th>Status</th><th>Break-even<br><span class="muted">firm money only${state.options.some((o) => T(o).proceeds) ? ', no auction bids' : ''}</span></th><th>Needed for ${money(target)}</th><th>Feasible capacity</th><th>Conservative net</th><th>Middle net</th><th>Optimistic net</th><th>Upfront cash</th><th>Volunteer hrs</th></tr></thead>
       <tbody>${state.options.map((o, i) => { const a = all[i]; const be = a.dec.breakEven, tg = a.dec.targetNeeded; return `<tr>
         <td><b>${esc(o.name)}</b></td>
-        <td><span class="badge ${statusClass(a.dec.status)}"><i>${statusIcon(a.dec.status)}</i>${esc(E.STATUS_LABELS[a.dec.status])}</span></td>
+        <td><span class="badge ${statusClass(a.dec.status)}"><i>${statusIcon(a.dec.status)}</i>${esc(E.STATUS_LABELS[a.dec.status])}</span>${blankScenarios(o).length ? ` <span class="flag">${esc(andList(blankScenarios(o).map((k) => SC_WORD[k])))} number not entered</span>` : ''}</td>
         <td>${be.reachableWithinCapacity ? `${be.participants} ${esc(T(o).many)}` : '<b class="neg">Not within capacity</b>'}</td>
         <td>${target ? (tg.reachableWithinCapacity ? `${tg.participants} ${esc(T(o).many)}` : '<b class="neg">Exceeds capacity</b>') : '—'}</td>
         <td>${be.maxFeasible} ${esc(T(o).many)}</td>
-        ${SC.map((k) => `<td class="${a.proj[k].net < 0 ? 'neg' : ''}">${money(a.proj[k].net)}</td>`).join('')}
+        ${SC.map((k) => notEntered((o.scenarioParticipants || {})[k]) ? `<td><span class="flag">not entered</span> <span class="muted">(counted as 0: ${money(a.proj[k].net)})</span></td>` : `<td class="${a.proj[k].net < 0 ? 'neg' : ''}">${money(a.proj[k].net)}</td>`).join('')}
         <td>${money(a.proj.middle.upfront.required)}</td><td>${a.proj.middle.volunteerHours}</td></tr>`; }).join('')}</tbody></table></div>`;
   }
 
@@ -785,7 +922,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     const ik = [...new Map(SC.flatMap((k) => P[k].inKind.applied.concat(P[k].inKind.notCounted.filter((n) => n.reason !== 'status_not_counted_in_this_scenario'))).map((x) => [x.id, x])).values()];
     return `<details class="detail" ${state.options.indexOf(o) === 0 ? 'open' : ''}><summary>${esc(o.name)} — scenario detail</summary>
       <p class="hint scroll-hint">Scroll the table sideways to see every column.</p><div class="table-wrap" tabindex="0" role="region" aria-label="${esc(o.name)}: scenario detail"><table class="res sc">
-        <thead><tr><th></th>${SC.map((k) => `<th>${esc(ss[k].label)}<br><span class="muted">sponsors: ${ss[k].statuses.join(' + ') || 'none'}</span></th>`).join('')}</tr></thead>
+        <thead><tr><th></th>${SC.map((k) => `<th>${esc(ss[k].label)}<br><span class="muted">sponsors: ${ss[k].statuses.join(' + ') || 'none'}</span>${notEntered((o.scenarioParticipants || {})[k]) ? '<br><span class="flag">number not entered: counted as 0</span>' : ''}</th>`).join('')}</tr></thead>
         <tbody>
           ${row(cap(T(o).many), (p) => `${p.participants}${flags(p)}`)}
           ${row(T(o).survey === 'buy' ? 'Sales' : 'Ticket and registration revenue', (p) => money(p.revenue.registration) + (p.revenue.groups ? ` <span class="muted">${p.revenue.groups} ${esc(T(o).groupName || 'group')}s + ${p.revenue.singles} single</span>` : ''))}
@@ -807,6 +944,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         </tbody></table></div>
       ${chart(o, a.curve, marks, Number(state.settings.fundraisingTarget) || 0)}
       <h4>What moves the middle scenario most</h4>
+      ${notEntered((o.scenarioParticipants || {}).middle) ? '<p class="flag">Your likely number is not entered, so this is worked out at 0.</p>' : ''}
       <div class="table-wrap" tabindex="0" role="region" aria-label="${esc(o.name)}: what moves the middle scenario"><table class="res small-t"><tbody>${a.sens.results.map((r) => `<tr><th>${esc(r.label)}</th><td class="${r.change < 0 ? 'neg' : ''}">${r.change >= 0 ? '+' : ''}${money(r.change)}</td><td class="muted">net becomes ${money(r.net)}</td></tr>`).join('')}</tbody></table></div>
       ${ik.length ? `<h4>In-kind handling</h4><ul class="plain">${ik.map((x) => x.replaces ? `<li>${esc(x.label)}: reduces “${esc(x.replaces)}” by ${money(x.reducedBy)}${x.excessNotCounted ? `; ${money(x.excessNotCounted)} of its value exceeds that cost and is not counted` : ''}.</li>` : `<li>${esc(x.label)}: not counted — it does not replace a budgeted cost.</li>`).join('')}</ul>` : ''}
     </details>`;
@@ -894,21 +1032,24 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       if (d.worst.contractualFloor > 0) why.push(`From the minimums and deposit you entered, the ${t.venue} bill is at least ${hm(d.worst.contractualFloor)} even if ${nobody}. That applies only if those are the terms you actually sign.`);
       if (P.middle.sponsorshipByStatus.hoped > 0) why.push(`${hm(P.middle.sponsorshipByStatus.hoped)} of sponsorship is only hoped-for and is left out of break-even.`);
       const vh = P.middle.volunteerHours;
-      if (vh) why.push(`Volunteer time: about ${vh} hours${vh && P.middle.net > 0 ? `, roughly ${hm(P.middle.net / vh)} raised per hour in the likely case` : ''}.`);
+      if (vh) why.push(`Volunteer time: about ${vh} hours${vh && P.middle.net > 0 && !notEntered((o.scenarioParticipants || {}).middle) ? `, roughly ${hm(P.middle.net / vh)} raised per hour in the likely case` : ''}.`);
       const matters = [];
-      if (top) matters.push(`Biggest effect on the likely case: “${top.label}” changes it by ${top.change >= 0 ? '+' : ''}${hm(top.change)}.`);
-      a.sens.results.slice(1, 3).forEach((r) => matters.push(`“${r.label}”: ${r.change >= 0 ? '+' : ''}${hm(r.change)}.`));
+      const likelyBlank = notEntered((o.scenarioParticipants || {}).middle);
+      if (likelyBlank) matters.push('Not worked out: your likely number is not entered, so these tests would only show the effect at 0.');
+      else if (top) matters.push(`Biggest effect on the likely case: “${top.label}” changes it by ${top.change >= 0 ? '+' : ''}${hm(top.change)}.`);
+      if (!likelyBlank) a.sens.results.slice(1, 3).forEach((r) => matters.push(`“${r.label}”: ${r.change >= 0 ? '+' : ''}${hm(r.change)}.`));
       if (d.conditional && d.breakEven.reachableWithinCapacity && d.conditional.participants !== d.breakEven.participants) matters.push(`Your assumed ${d.conditional.uses.join(' and ')} would lower break-even to ${d.conditional.participants}${d.conditional.reachableWithinCapacity ? '' : ' (not reachable)'}, but they aren't promised.`);
       return `<article class="sum" aria-labelledby="sum-${i}">
         <h3 id="sum-${i}" class="sum-title">${esc(o.name)}</h3>
         <p class="status-line"><span class="badge ${statusClass(d.status)}"><i aria-hidden="true">${statusIcon(d.status)}</i>${esc(E.STATUS_LABELS[d.status])}</span></p>
         <p class="meaning">${esc(STATUS_MEANING[d.status])}</p>
+        ${blankNote(o) ? `<p class="warn-callout blank-note">${esc(blankNote(o))}</p>` : ''}
         ${hasProductGrouping(o) ? `<p class="warn-callout">This product option uses group settings that can change item counts or pricing. <a href="#step-quote">Review the supplier step</a> before relying on these results.</p>` : ''}
         <div class="cards">
           <div class="card ${gapOpen ? 'bad' : ''}"><span>${t.survey === 'buy' ? 'Cash needed up front' : 'Cash needed before event day'}</span><b>${hm(x.cashNeededBeforeEvent)}</b><em>Deposit and bills due in advance. You have ${hm(x.cashInHand)} in hand${x.shortBeforeEvent > 0 ? `, so you are short ${hm(x.shortBeforeEvent)}${o.upfrontFundingConfirmed ? ' (the club confirmed it can cover this)' : ' (not yet covered)'}` : ''}.${d.firm.upfront.registrationCashUnknown ? ' Money received from people who paid is not entered yet.' : ''}</em></div>
           <div class="card ${x.largestLoss > 0 || moreLoss ? 'bad' : ''}"><span>Loss if ${nobody} or you cancel</span><b>${hm(x.largestLoss)}${x.cancellationKnown ? '' : ' or more'}</b><em>If ${nobody}: ${hm(x.lossIfNobodyComes)}. If you cancel after the deadline: ${x.cancellationKnown ? hm(x.lossIfCanceled) : 'not entered yet'}. ${moreLoss ? `<strong>Holding it can lose more:</strong> at ${x.worstOnChart.participants} ${esc(t.many)}, firm money comes out at ${hm(x.worstOnChart.net)} (see the chart).` : 'Other turnouts can lose more; check the chart.'} Uses only the terms you entered.</em></div>
           <div class="card ${!d.breakEven.reachableWithinCapacity || d.breakEven.participants > have ? 'bad' : ''}"><span>Needed to break even</span><b>${d.breakEven.reachableWithinCapacity ? `${d.breakEven.participants} ${esc(unit)}` : 'Not reachable'}</b><em>${d.breakEven.reachableWithinCapacity ? '' : `Even all ${d.breakEven.maxFeasible} wouldn't cover costs. `}${d.breakEven.reachableWithinCapacity && d.paid > 0 && d.breakEven.participants <= d.paid ? `Already reached by the ${d.paid} who have paid. ` : ''}Firm money only${t.proceeds ? ', no auction bids' : ''}. You have ${d.paid} paid + ${d.namedCounted} named “yes” = ${have}. Named answers are not money.</em></div>
-          <div class="card"><span>Likely case (your estimate)</span><b>${hm(P.middle.net)}</b><em>Low case ${hm(P.conservative.net)}, high case ${hm(P.optimistic.net)}. These use your own numbers and are not predictions.${t.proceeds ? ' They include your auction and raffle estimates.' : ''}</em></div>
+          <div class="card"><span>Likely case (your estimate)</span><b>${notEntered((o.scenarioParticipants || {}).middle) ? 'Not entered' : hm(P.middle.net)}</b><em>${notEntered((o.scenarioParticipants || {}).middle) ? `Counted as 0 ${esc(t.many)} in the figures: ${hm(P.middle.net)}. ` : ''}Low case ${scenarioNet(o, 'conservative', P.conservative)}, high case ${scenarioNet(o, 'optimistic', P.optimistic)}. These use your own numbers and are not predictions.${t.proceeds ? ' They include your auction and raffle estimates.' : ''}</em></div>
         </div>
         <p class="aloud"><b>What to tell the board (30 seconds):</b> ${esc(readAloud(o, d, P, hm))}</p>
         <div class="sum-grid">
@@ -977,6 +1118,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       `Left out: ${b.leftOut > 0 ? Object.entries(b.leftOutByStatus).map(([k, v]) => `${hm(v)} ${{ committed: 'promised in writing (this case counts collected money only)', hoped: 'hoped-for (never counted here)', collected: 'collected' }[k]}`).join(', ') : 'no sponsorship'}; add-ons, other income and auction or raffle estimates. Cost cushion ${esc(b.costCushionPct)}%.`,
     ];
     const lines = [];
+    if (req.scenario && notEntered((o.scenarioParticipants || {})[req.scenario])) lines.push(`<b>Your ${esc(SC_WORD[req.scenario])} number is not entered</b>, so this is worked out at 0 ${esc(t.many)}. Enter it on the “Plan for low, likely and high” step, or choose another number.`);
     const firmNet = `<b class="${w.net < 0 ? 'neg' : ''}">${hm(w.net)}</b>`;
     // Break-even: the gap at this number, then a headcount answer only when more people actually raise firm money.
     let beText;
@@ -1034,7 +1176,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       <p class="hint">Hypothetical answers for one option at one number you choose, on firm money. <b>Nothing here changes your plan</b> unless you press a “Use … in my plan” button. These boxes aren’t saved; they clear when you reload.</p>
       <div class="fields wi-controls">
         ${state.options.length > 1 ? `<label class="f"><span>Option</span><select data-whatif="opt">${state.options.map((x, k) => `<option value="${k}" ${k === i ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>` : ''}
-        <label class="f"><span>At which number?</span><select data-whatif="at">${SC.map((k) => `<option value="${k}" ${whatIf.at === k ? 'selected' : ''}>${esc(ss[k].label)} case: ${esc(sp[k] ?? 0)} ${esc(t.many)}</option>`).join('')}<option value="custom" ${whatIf.at === 'custom' ? 'selected' : ''}>Another number…</option></select></label>
+        <label class="f"><span>At which number?</span><select data-whatif="at">${SC.map((k) => `<option value="${k}" ${whatIf.at === k ? 'selected' : ''}>${esc(ss[k].label)} case: ${notEntered(sp[k]) ? 'not entered' : `${esc(sp[k])} ${esc(t.many)}`}</option>`).join('')}<option value="custom" ${whatIf.at === 'custom' ? 'selected' : ''}>Another number…</option></select></label>
         ${whatIf.at === 'custom' ? `<label class="f"><span>Number of ${esc(unitMany)}</span><input type="number" inputmode="numeric" step="1" min="0" data-whatif="custom" value="${esc(whatIf.custom)}"></label>` : ''}
       </div>
       <ul class="plain hint wi-basis">${basis.map((x) => `<li>${x}</li>`).join('')}</ul>
@@ -1076,16 +1218,18 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     if (state.isDemo) L.push('**FICTIONAL EXAMPLE: every number is made up. Not a recommendation for any real event.**');
     L.push(`Prepared ${showDate(localYMD())} from the organizer's entries. This is a planning summary, not a record of board approval.`);
     L.push(`Fundraising target: ${money(state.settings.fundraisingTarget || 0)} after costs. Figures are rounded to the nearest dollar.`);
+    L.push(criteriaLine(), `_${READY_CAVEAT}_`);
     for (const o of state.options) {
       const a = analyse(o), d = a.dec, P = a.proj;
       L.push('', `## ${o.name}`, `**Status: ${E.STATUS_LABELS[d.status]}**`);
       L.push(`${STATUS_MEANING[d.status]}`);
+      if (blankNote(o)) L.push('', `**${blankNote(o)}**`);
       L.push('', `> **Read-aloud (30 seconds):** ${readAloud(o, d, P, hm)}`, '');
       const xp = d.exposure, nobodyM = T(o).survey === 'buy' ? 'nothing sells' : 'nobody comes';
       L.push(`- Cash needed before the event: ${hm(xp.cashNeededBeforeEvent)}. Loss if ${nobodyM} or you cancel after the deadline, under the terms entered: ${hm(xp.largestLoss)}${xp.cancellationKnown ? '' : ' or more (cancellation terms not entered)'}. ${xp.worstOnChartLoss > xp.largestLoss ? `Holding it can lose more: at ${xp.worstOnChart.participants} ${T(o).many}, firm money comes out at ${hm(xp.worstOnChart.net)}.` : 'Other turnouts can lose more; see the chart in the planner.'}`);
       d.reasons.forEach((r) => L.push(`- ${r}`));
       L.push(`- Break-even (firm sponsorship only): ${d.breakEven.reachableWithinCapacity ? d.breakEven.participants + ' ' + T(o).many : 'not reachable within capacity'} of ${d.breakEven.maxFeasible} feasible.`);
-      L.push(`- Net: conservative ${hm(P.conservative.net)} (${P.conservative.participants}), middle ${hm(P.middle.net)} (${P.middle.participants}), optimistic ${hm(P.optimistic.net)} (${P.optimistic.participants}).`);
+      L.push(`- Net: ${SC.map((k) => notEntered((o.scenarioParticipants || {})[k]) ? `${k} not entered (counted as 0: ${hm(P[k].net)})` : `${k} ${hm(P[k].net)} (${P[k].participants})`).join(', ')}.`);
       L.push(`- Cash needed before the event (firm money only): ${hm(d.firm.upfront.required)}; cash in hand ${hm(d.firm.upfront.cashInHand)}${d.firm.upfront.registrationCashUnknown ? ' (registration money received not entered)' : ''}; short by ${hm(d.firm.upfront.gap)}${d.firm.upfront.gap > 0 ? (o.upfrontFundingConfirmed ? ' (club confirmed it can cover this)' : ' (not yet covered)') : ''}.`);
       L.push(`- Worst case if nobody registers: ${hm(d.worst.netIfNobodyRegisters)}. Volunteer hours: ${P.middle.volunteerHours}.`);
       L.push(`- Evidence: ${d.paid} paid${P.middle.upfront.registrationCashUnknown ? ' (amount received not entered)' : ''}, ${d.named} named "yes"${d.named !== d.namedCounted ? ' (not counted: collected for different or unrecorded terms)' : ''}, ${d.definitely} anonymous "yes", ${d.responses} responses.`);
@@ -1098,6 +1242,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       batch2Lines(o).forEach((l) => L.push(`- ${l}`));
       const rl = researchLines(o);
       if (rl.length) { L.push(`- Research on file (${state.isDemo ? 'fictional; ' : ''}organizer's records; not used in any calculation):`); rl.forEach((l) => L.push(l.startsWith('  ') ? `    - ${l.trim()}` : `  - ${l}`)); }
+      readyMemoLines(o).forEach((l) => L.push(l));
     }
     const au = E.audienceSummary(state);
     if (au.groups || au.fictionalLeftOut) {
@@ -1164,7 +1309,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     if (a === 'price') return money(Number(o.price) || 0) + ` per ${t.one}`;
     if (a === 'groupPrice') return (Number(o.groupSize) || 1) > 1 ? (o.groupPrice == null || o.groupPrice === '' ? `${money((Number(o.price) || 0) * Number(o.groupSize))} (no discount)` : money(Number(o.groupPrice))) + ` per ${t.groupName || 'group'} of ${o.groupSize}` : 'no group pricing';
     if (a === 'capacity') return `${E.maxFeasible(o)} ${t.many}`;
-    if (a === 'conservative' || a === 'middle' || a === 'optimistic') return `${sp[a] ?? 0} ${t.many}`;
+    if (a === 'conservative' || a === 'middle' || a === 'optimistic') return notEntered(sp[a]) ? 'not entered' : `${sp[a]} ${t.many}`;
     if (a === 'sponsorship') { const p = E.project(o, 0, E.firmContext(state, o)); return `${money(p.sponsorshipByStatus.collected + p.sponsorshipByStatus.committed)} collected or committed; ${money(p.sponsorshipByStatus.hoped)} hoped-for`; }
     if (a === 'costs') return `${money((o.perParticipantCosts || []).reduce((s, l) => s + (Number(l.amount) || 0), 0))} per ${t.one} + ${money((o.fixedCosts || []).reduce((s, l) => s + (Number(l.amount) || 0), 0))} one-time`;
     return '—';
@@ -1520,6 +1665,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <p id="live-status" class="sr-only" aria-live="polite">${esc(live)}</p>
       </header>
       <section class="panel" aria-label="Answers for each option">${renderSummary(all)}</section>
+      ${readySection()}
       ${renderWhatIf()}
       ${sameTurnoutPanel()}
       ${state.options.length > 1 ? `<section class="panel"><h2>Side by side</h2>${renderComparison(all)}</section>` : ''}
@@ -1856,6 +2002,8 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     }
     if (!isObj(s.settings) || !isNum(s.settings.fundraisingTarget) || !isNum(s.settings.volunteerHourValue)) p.push('Plan settings are missing or not numbers.');
     if (!isNum(s.volunteerHoursAvailable)) p.push('Volunteer hours available must be a number.');
+    // Decision criteria (optional; row 90): blank = not set, numbers 0 or more, a real calendar date.
+    if (s.criteria != null && (!isObj(s.criteria) || !isNum(s.criteria.minNet) || !isNum(s.criteria.maxLoss) || !(s.criteria.decideBy == null || s.criteria.decideBy === '' || E.isCalendarDate(s.criteria.decideBy)))) p.push('Decision criteria must be amounts of 0 or more and a calendar date.');
     if (s.snapshot != null && (!isObj(s.snapshot) || Object.values(s.snapshot).some((v) => !isStr(v)))) p.push('Survey details must be text.');
     // Research (optional; row 84). Imported research is untrusted: every known field is type-checked. Unknown extra fields
     // are kept but never shown. Links may point at a missing option or record: that is shown, not refused.

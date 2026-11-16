@@ -48,6 +48,8 @@ jobs:
         run: python test/ui_scenarios.py
       - name: Removing an option keeps the plan readable
         run: python test/ui_option_delete.py
+      - name: Ready to commit? (criteria, evidence, next steps)
+        run: python test/ui_ready.py
       - name: Volunteer journey
         run: |
           mkdir -p browser-evidence
