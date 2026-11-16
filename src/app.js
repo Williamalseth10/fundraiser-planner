@@ -408,7 +408,7 @@
       const c = choices.get(l.id) || { label: l.label || 'Unnamed cost', where: [] };
       c.where.push(`${o.name}: ${money(l.amount)}`); choices.set(l.id, c);
     }));
-    const optSel = (j, v, nm) => `<select data-path="sponsorships.${j}.optionId" aria-label="Which option ${nm} applies to"><option value="">All options</option>${state.options.map((o) => `<option value="${esc(o.id)}" ${o.id === v ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>`;
+    const optSel = (j, v, nm) => `<select data-path="sponsorships.${j}.optionId" aria-label="Which option ${nm} applies to"><option value="">All options</option>${v && !state.options.some((o) => o.id === v) ? `<option value="${esc(v)}" selected>(option removed: counts for no option)</option>` : ''}${state.options.map((o) => `<option value="${esc(o.id)}" ${o.id === v ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>`;
     return `<div class="table-wrap"><table class="edit">
       <thead><tr><th>Sponsor or donation</th><th>Value ($)</th><th>Status</th><th>Type</th><th>Budgeted cost it replaces</th><th>Applies to</th><th><span class="sr-only">Remove</span></th></tr></thead>
       <tbody>${state.sponsorships.map((s, j) => { const nm = esc(s.label || `Sponsor ${j + 1}`); return `<tr>
@@ -1509,7 +1509,12 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     else if (a === 'confirm-terms') { if (!armed(b, 'Only if you asked supporters about this exact offer. Click again')) return; state.evidence.offerTerms = state.evidence.offerTerms || {}; state.evidence.offerTerms[state.options[i].id] = E.offerTerms(state.options[i], state.snapshot); say('Recorded: these answers are for the current offer.'); }
     else if (a === 'add-option') { const o = clone(window.BFDemo.BLANK_STATE.options[0]); o.id = uid('opt_'); o.name = 'New option'; state.options.push(o); openOption = state.options.length - 1; }
     else if (a === 'dup-option') { const o = clone(state.options[i]); o.id = uid('opt_'); o.name += ' (copy)'; state.options.push(o); openOption = state.options.length - 1; }
-    else if (a === 'del-option') { if (!armed(b, 'Click again to remove')) return; state.options.splice(i, 1); openOption = 0; }
+    else if (a === 'del-option') {
+      if (!armed(b, 'Click again to remove')) return;
+      state.options.splice(i, 1); openOption = 0;
+      // Its survey and payment counts stay in the file (nothing is erased) but count for nothing; the plan stays readable.
+      say('Option removed. Its survey answers and payment numbers stay in your saved file but no longer count, and sponsors tied only to it now count for no option.');
+    }
     else if (a === 'fill-evidence') {
       const o = state.options[i], d = E.decide(state, o);
       o.scenarioParticipants.conservative = d.paid;
@@ -1650,18 +1655,19 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     const ss = s.scenarioSettings;
     if (!isObj(ss) || !['conservative', 'middle', 'optimistic'].every((k) => isObj(ss[k]) && Array.isArray(ss[k].statuses) && ss[k].statuses.every((x) => E.SPONSOR_STATUSES.includes(x)) && ['extraRevenuePerParticipant', 'otherRevenue', 'costContingencyPct'].every((f) => isNum(ss[k][f])) && isStr(ss[k].label))) p.push('Scenario settings are missing or incomplete.');
     if (!Array.isArray(s.sponsorships)) p.push('Sponsorships must be a list.');
-    else if (s.sponsorships.some((x) => !isObj(x) || !isNum(x.amount) || !E.SPONSOR_STATUSES.includes(x.status) || !['cash', 'inKind'].includes(x.type) || !isStr(x.label) || (x.optionId && !ids.has(x.optionId)) || (x.replacesCostId && !SAFE_ID.test(String(x.replacesCostId))) || (x.id != null && !SAFE_ID.test(String(x.id))))) p.push('A sponsorship has a bad amount, status, type or link.');
+    else if (s.sponsorships.some((x) => !isObj(x) || !isNum(x.amount) || !E.SPONSOR_STATUSES.includes(x.status) || !['cash', 'inKind'].includes(x.type) || !isStr(x.label) || (x.optionId && !SAFE_ID.test(String(x.optionId))) || (x.replacesCostId && !SAFE_ID.test(String(x.replacesCostId))) || (x.id != null && !SAFE_ID.test(String(x.id))))) p.push('A sponsorship has a bad amount, status, type or link.');
     const ev = s.evidence;
     if (!isObj(ev)) p.push('Survey and payment evidence is missing.');
     else {
       if (!isNum(ev.surveyResponses)) p.push('The number of survey responses must be a number.');
       ['paidRegistrations', 'paidCashReceived', 'namedHighIntent', 'surveyDefinitelyAtPrice', 'surveyProbablyAtPrice'].forEach((k) => {
         if (ev[k] == null) return;
-        if (!isObj(ev[k]) || Object.entries(ev[k]).some(([id, v]) => !ids.has(id) || !isNum(v))) p.push(`Evidence "${k}" must hold numbers for this plan's options only.`);
+        // Entries for an option that was deleted are kept and ignored (row 86); they must still be safe ids and numbers.
+        if (!isObj(ev[k]) || Object.entries(ev[k]).some(([id, v]) => !SAFE_ID.test(id) || !isNum(v))) p.push(`Evidence "${k}" must hold numbers for the plan's options.`);
       });
       ['offerTerms', 'surveyIssuedTerms'].forEach((k) => {
         if (ev[k] == null) return;
-        if (!isObj(ev[k]) || Object.entries(ev[k]).some(([id, t]) => !ids.has(id) || !isObj(t) || Object.values(t).some((v) => v != null && !['string', 'number'].includes(typeof v)))) p.push(`Evidence "${k}" is not readable.`);
+        if (!isObj(ev[k]) || Object.entries(ev[k]).some(([id, t]) => !SAFE_ID.test(id) || !isObj(t) || Object.values(t).some((v) => v != null && !['string', 'number'].includes(typeof v)))) p.push(`Evidence "${k}" is not readable.`);
       });
     }
     if (!isObj(s.settings) || !isNum(s.settings.fundraisingTarget) || !isNum(s.settings.volunteerHourValue)) p.push('Plan settings are missing or not numbers.');
