@@ -157,6 +157,72 @@ test('same turnout: each option rounds to its own whole groups; equal costs need
   const r = E.compareAtSameTurnout(s, tee, sg, 50);
   assert.deepEqual([r.a.participants, r.b.participants, r.sameCount], [50, 48, false]);
   assert.ok(r.b.flags.includes('rounded_down_to_whole_groups'));
-  const same = E.compareAtSameTurnout(s, sg, clone(sg), 48);
-  assert.deepEqual([same.costlierId, same.extraCost, same.sponsorshipToCover, same.playersToCover], [null, 0, 0, 0]);
+  const twin = clone(sg); twin.id = 'twin';
+  const same = E.compareAtSameTurnout(s, sg, twin, 48);
+  assert.deepEqual([same.costlierId, same.extraCost, same.netDifference], [null, 0, 0]);
+  assert.deepEqual([same.sponsorshipToCover, same.playersToCover, same.recoverable, same.recoveryApplicable], [null, null, null, false]);
+});
+
+// ---- row 88: corrections from the independent review of b496eae ----
+test('same turnout: options counting different things (guests vs items) are not compared at all', () => {
+  const g = clone(D.DEMO_GALA), [gala, dough] = g.options;
+  assert.deepEqual([E.unitOf(gala), E.unitOf(dough)], ['guests', 'items']);
+  const r = E.compareAtSameTurnout(g, gala, dough, 48);
+  assert.equal(r.comparable, false); assert.equal(r.reason, 'units');
+  assert.deepEqual(r.units, { a: 'guests', b: 'items' });
+  ['a', 'b', 'sameCount', 'sponsorshipToCover', 'playersToCover', 'recoverable', 'extraCost', 'costlierId'].forEach((k) => assert.equal(r[k], undefined, k));
+  // ordinary financial comparisons of the same two options are unaffected
+  const cmp = E.compareOptions(g);
+  assert.equal(cmp.length, 2);
+  // tee times and a shotgun both count players, so they stay comparable
+  const s = teeVsShotgun();
+  assert.equal(E.compareAtSameTurnout(s, s.options[0], s.options[1], 48).comparable, true);
+  // a generic option counts people, not players
+  const alt = clone(s.options[0]); alt.id = 'alt'; alt.kind = 'generic';
+  assert.equal(E.compareAtSameTurnout(s, s.options[0], alt, 48).reason, 'units');
+});
+
+test('same turnout: below the number already paid keeps the engine warning and gives no recovery figures', () => {
+  const s = control(), sg = s.options[0]; // 32 paid, $4,000 received
+  const tee = clone(sg); Object.assign(tee, { id: 'tee', name: 'Tee times (fictional)', kind: 'golf_tee_times' });
+  tee.venueQuote = { flatFee: 0, perParticipant: 55, minimumParticipants: 0, minimumSpend: 0 };
+  s.options.push(tee); s.evidence.paidRegistrations.tee = 0;
+  const before = clone(s);
+  const r = E.compareAtSameTurnout(s, sg, tee, 0);
+  assert.equal(r.comparable, true); assert.equal(r.reason, 'belowPaid');
+  assert.ok(r.a.flags.includes('fewer_than_already_paid'));          // project()'s own flag is kept
+  assert.deepEqual(r.a.flags, E.project(sg, 0, E.firmContext(s, sg)).flags);
+  assert.deepEqual([r.a.paid, r.a.belowPaid, r.b.belowPaid], [32, true, false]);
+  assert.equal(r.a.revenue, E.project(sg, 0, E.firmContext(s, sg)).revenue.total); // received money unchanged, not re-priced
+  assert.equal(r.a.participants, 0);                                    // attendance is not silently raised
+  assert.deepEqual([r.sponsorshipToCover, r.playersToCover, r.recoverable, r.recoveryApplicable], [null, null, null, false]);
+  assert.deepEqual(s, before);
+  // at the paid number, recovery figures come back
+  assert.equal(E.compareAtSameTurnout(s, sg, tee, 32).recoveryApplicable, true);
+  // capacity below the paid count: withheld at every number, and said to be a capacity problem
+  const c2 = clone(s); c2.options[0].capacity = 28;
+  [0, 28, 32, 100].forEach((n) => {
+    const r2 = E.compareAtSameTurnout(c2, c2.options[0], c2.options[1], n);
+    assert.equal(r2.reason, 'belowPaid', String(n)); assert.equal(r2.a.capacityBelowPaid, true); assert.equal(r2.playersToCover, null);
+  });
+});
+
+test('same turnout: equal costs with unequal firm money report the difference and no recovery figures', () => {
+  const s = control(), x = s.options[0];
+  const y = clone(x); Object.assign(y, { id: 'y', name: 'Same course, lower price (fictional)', price: 100, groupPrice: null });
+  s.options.push(y); s.evidence.paidRegistrations.y = 0;
+  const r = E.compareAtSameTurnout(s, x, y, 72);
+  assert.equal(r.a.expenses, r.b.expenses);
+  assert.notEqual(r.a.net, r.b.net);
+  assert.equal(r.reason, 'equalCosts'); assert.equal(r.costlierId, null); assert.equal(r.extraCost, 0);
+  assert.equal(r.netDifference, (cents(r.a.net) - cents(r.b.net)) / 100);
+  assert.equal(r.higherNetId, 'golf');
+  assert.deepEqual([r.sponsorshipToCover, r.playersToCover, r.recoverable, r.recoveryApplicable], [null, null, null, false]);
+  // option-specific sponsorship also changes firm money without changing costs
+  const s2 = control(), a2 = s2.options[0], b2 = clone(a2); b2.id = 'b2'; s2.options.push(b2); s2.evidence.paidRegistrations.b2 = 32; s2.evidence.paidCashReceived.b2 = 4000;
+  s2.sponsorships = (s2.sponsorships || []).concat([{ id: 'sp_only_b2', label: 'Option-only sponsor (fictional)', type: 'cash', amount: 700, status: 'committed', optionId: 'b2' }]);
+  const r2 = E.compareAtSameTurnout(s2, a2, b2, 72);
+  assert.equal(r2.reason, 'equalCosts');
+  assert.equal(r2.netDifference, 700); assert.equal(r2.higherNetId, 'b2');
+  assert.equal(r2.sponsorshipToCover, null);
 });

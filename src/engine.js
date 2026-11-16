@@ -914,6 +914,11 @@
     return { available: true, scenario: k, paid, capacity: cap, maxFeasible: max, current, rows };
   }
 
+  // What one participant is, per kind of fundraiser. Two options can be compared at "the same turnout" only when they
+  // count the same thing: 48 guests and 48 items are not the same turnout (row 88).
+  const UNIT_OF_KIND = { golf_tee_times: 'players', golf_shotgun: 'players', participation: 'participants', ticketed: 'guests', auction: 'guests', product: 'items', generic: 'people' };
+  const unitOf = (o) => UNIT_OF_KIND[o && o.kind] || 'people';
+
   /**
    * Two options (for example tee times and a shotgun start) at the SAME requested number of participants, on the
    * firm-money basis. Each is rounded to its own whole groups. Reports the extra documented cost of the costlier one,
@@ -922,12 +927,22 @@
    * pricing, minimums and deposit floors are handled), or that it can't be recovered within capacity.
    * It assumes nothing about one format attracting more people or a higher price: that would be the organizer's
    * assumption, kept out of these numbers.
+   * Withheld or limited (row 88):
+   *  - comparable:false, reason 'units': the options count different things (guests vs items); no figures at all.
+   *  - reason 'belowPaid': either side would be below the number already paid (including a capacity below it); the
+   *    figures and project()'s own warnings are kept, recovery figures are null. Money received is never changed.
+   *  - reason 'equalCosts': recovery figures are null (not applicable); the firm-money difference is still reported.
    */
   function compareAtSameTurnout(state, a, b, requested) {
+    const units = { a: unitOf(a), b: unitOf(b) };
+    if (units.a !== units.b) return { comparable: false, reason: 'units', units, aName: a.name, bName: b.name };
     const side = (o) => {
       const ctx = firmContext(state, o), norm = normalizeParticipants(o, requested), p = project(o, norm.participants, ctx);
+      const paid = int(ctx.paidRegistrations), max = maxFeasible(o);
       return {
-        o, ctx, id: o.id, name: o.name, requested: norm.requested, participants: norm.participants, flags: norm.flags,
+        o, ctx, id: o.id, name: o.name, requested: norm.requested, participants: p.participants,
+        flags: Array.from(new Set([...(p.flags || []), ...(norm.flags || [])])), // project()'s warnings are kept
+        paid, belowPaid: p.participants < paid, capacityBelowPaid: max < paid, maxFeasible: max,
         revenue: p.revenue.total, expenses: p.expenses.total, net: p.net,
         costs: { venue: p.expenses.venue, perParticipant: p.expenses.perParticipant, fixed: p.expenses.fixed, separateDepositFee: p.expenses.separateDepositFee, contingency: p.expenses.contingency },
         venueMinimumApplied: p.expenses.venueMinimumApplied, cashNeeded: p.upfront.required, quoteVerified: !!o.quoteVerified, costsVerified: !!o.costsVerified,
@@ -936,7 +951,13 @@
     const A = side(a), B = side(b);
     const strip = (x) => { const { o, ctx, ...rest } = x; return rest; };
     const ea = c(A.expenses), eb = c(B.expenses);
-    if (ea === eb) return { a: strip(A), b: strip(B), costlierId: null, extraCost: 0, sponsorshipToCover: 0, playersToCover: 0, recoverable: true, sameCount: A.participants === B.participants };
+    const base = { comparable: true, units, a: strip(A), b: strip(B), sameCount: A.participants === B.participants,
+      extraCost: d(Math.abs(eb - ea)), netDifference: d(Math.abs(c(A.net) - c(B.net))),
+      higherNetId: c(A.net) === c(B.net) ? null : (c(A.net) > c(B.net) ? A.id : B.id) };
+    const notApplicable = { sponsorshipToCover: null, playersToCover: null, recoverable: null, recoveryApplicable: false };
+    const costlierId = ea === eb ? null : (ea < eb ? B.id : A.id);
+    if (A.belowPaid || B.belowPaid) return { ...base, ...notApplicable, reason: 'belowPaid', costlierId };
+    if (ea === eb) return { ...base, ...notApplicable, reason: 'equalCosts', costlierId: null };
     const [X, Y] = ea < eb ? [A, B] : [B, A]; // X costs less; Y costs more
     const target = c(X.net), gap = target - c(Y.net);
     let players = 0, recoverable = true;
@@ -946,11 +967,10 @@
       if (hit) players = hit.participants - Y.participants; else { players = null; recoverable = false; }
     }
     return {
-      a: strip(A), b: strip(B), costlierId: Y.id, cheaperId: X.id,
-      extraCost: d(Math.abs(eb - ea)), extraRevenue: d(c(Y.revenue) - c(X.revenue)),
+      ...base, reason: null, recoveryApplicable: true, costlierId: Y.id, cheaperId: X.id,
+      extraRevenue: d(c(Y.revenue) - c(X.revenue)),
       netGap: d(Math.max(0, gap)), sponsorshipToCover: d(Math.max(0, gap)),
       playersToCover: players, recoverable, maxFeasibleCostlier: maxFeasible(Y.o),
-      sameCount: A.participants === B.participants,
     };
   }
 
@@ -968,7 +988,7 @@
     registrationCents, worstCase, cancellationExposure, roundHeadline,
     project, participantsNeeded, netCurve, sensitivity, scenarioContext, firmContext, decide, offerTerms, evidenceStatus,
     whatWouldChange, compareOptions, hypotheticalPrice, pricingMargins,
-    interestFunnel, capacityShortcuts, compareAtSameTurnout,
+    interestFunnel, capacityShortcuts, compareAtSameTurnout, unitOf,
     audienceSummary, comparableSummary, researchProblems, researchKind, researchVerification, RESEARCH_UNITS, AUDIENCE_CATEGORIES, PROVENANCES, VERIFICATIONS, contractChecklist, isCalendarDate, daysBetween, CONTRACT_DATES, CONTRACT_TEXT,
   };
 

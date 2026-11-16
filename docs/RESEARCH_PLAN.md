@@ -90,7 +90,7 @@ Reconciled with the Batch 2 brief. The rule is: reuse what works, add only what 
 | Time and effort without a money value for hours | Hours vs budget only; the existing optional hour value stays off unless the organizer set it | Deferred (rule) |
 | Never guaranteed, predicted or auto-approved | Fixed wording, tested | Deferred (rule) |
 | Printable brief | Calculations / evidence / assumptions / open questions as four labeled blocks per option | Deferred |
-| **Learned in Batch 2** | (a) Past rounds must be shown, never counted; Batch 3's "evidence supports" uses current-offer counts only. (b) Capacity shortcuts are not evidence: Batch 3 should flag a likely number that equals a 50/75/100% shortcut and has no cited reason as an assumption to validate. (c) The same-turnout comparison is the right input for "is the extra format worth it?"; keep its "not a forecast" wording. | Plan |
+| **Learned in Batch 2** | (a) Past rounds must be shown, never counted; Batch 3's "evidence supports" uses current-offer counts only. (b) Capacity shortcuts are not evidence: Batch 3 should flag a likely number that equals a 50/75/100% shortcut and has no cited reason as an assumption to validate. (c) The same-turnout comparison is the right input for "is the extra format worth it?"; keep its "not a forecast" wording. (d) From the review of `b496eae` (row 88): Batch 3 must reuse its guards. Never compare options that count different things, never give recovery figures below the number already paid, and treat equal costs as "not applicable", not "nothing needed". | Plan |
 
 ## Order of work
 Batch 1, then review, then Batch 2 (it needs Batch 1's records for sources), then review, then Batch 3 (it reads both).

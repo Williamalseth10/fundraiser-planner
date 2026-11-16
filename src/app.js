@@ -650,13 +650,28 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   }
   function sameTurnout() {
     const [A, B] = samePair();
-    // Default: the first option's likely number, but never more than both options can take, so the comparison is like for like.
-    const n = sameT.n === '' ? Math.min(Number((A.scenarioParticipants || {}).middle) || 0, E.maxFeasible(A), E.maxFeasible(B)) : Math.max(0, Number(sameT.n) || 0);
+    // Default: the first option's likely number, raised to the most already paid on either side (row 88), but never more
+    // than both options can take, so the comparison is like for like. Nothing is saved.
+    const paid = (o) => Number(((state.evidence || {}).paidRegistrations || {})[o.id]) || 0;
+    const n = sameT.n === '' ? Math.min(Math.max(Number((A.scenarioParticipants || {}).middle) || 0, paid(A), paid(B)), E.maxFeasible(A), E.maxFeasible(B)) : Math.max(0, Number(sameT.n) || 0);
     return { A, B, n, r: E.compareAtSameTurnout(state, A, B, n) };
   }
   function sameTurnoutWords(A, B, r) {
-    if (!r.costlierId) return `At this number both cost the same (${money(r.a.expenses)}).`;
-    const [Y, X, yo] = r.costlierId === A.id ? [r.a, r.b, A] : [r.b, r.a, B], many = T(yo).many;
+    // Different counting units (row 88): 48 guests and 48 items are not the same turnout, so nothing is compared.
+    if (!r.comparable) return `Not compared at the same turnout: ${A.name} counts ${r.units.a} and ${B.name} counts ${r.units.b}. The same number of ${r.units.a} and ${r.units.b} is not the same turnout, so no extra cost or recovery figures are given. Compare each at its own numbers in the Side by side table below.`;
+    const many = T(A).many;
+    if (r.reason === 'belowPaid') {
+      const why = [r.a, r.b].filter((x) => x.belowPaid).map((x) => x.capacityBelowPaid
+        ? `${x.name} has ${x.paid} ${many} already paid but can take at most ${x.maxFeasible}: check its capacity and the paid count`
+        : `${x.name} has ${x.paid} ${many} already paid, more than ${x.participants}`).join('; ');
+      const need = Math.max(r.a.paid, r.b.paid), fits = Math.min(r.a.maxFeasible, r.b.maxFeasible) >= need;
+      return `No recovery figures: ${why}. Money already received is counted as received and is not changed. ${fits ? `Choose at least ${need} ${many} to compare what the extra cost would take.` : 'Fix the capacity or the paid count before comparing.'}`;
+    }
+    if (!r.costlierId) {
+      const higher = r.higherNetId === A.id ? r.a.name : r.b.name;
+      return `Both cost the same (${money(r.a.expenses)}) at this number, so there is no extra cost to cover and no recovery figures apply.${r.higherNetId ? ` Their firm money still differs by ${money(r.netDifference)} (${higher} ends up with more), because of ticket prices or option-specific sponsorship, not costs.` : ' They also end up with the same firm money.'}`;
+    }
+    const [Y, X] = r.costlierId === A.id ? [r.a, r.b] : [r.b, r.a];
     const head = r.sameCount ? `${Y.name} costs ${money(r.extraCost)} more than ${X.name} at ${Y.participants} ${many}.`
       : `Not like for like: ${Y.name} is counted at ${Y.participants} and ${X.name} at ${X.participants} (capacity or whole-group rules). At those numbers ${Y.name} costs ${money(r.extraCost)} more.`;
     if (!(r.sponsorshipToCover > 0)) return `${head} It still ends up with at least as much firm money at that number, so nothing extra is needed.`;
@@ -665,20 +680,25 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   function sameTurnoutPanel() {
     if (state.options.length < 2) return '';
     const { A, B, n, r } = sameTurnout();
-    const col = (x) => [x.participants + (x.flags.length ? ` (from ${x.requested}: ${x.flags.map((f) => f.replace(/_/g, ' ')).join(', ')})` : ''), money(x.revenue), money(x.costs.venue), money(x.costs.perParticipant), money(x.costs.fixed), money(x.costs.separateDepositFee), money(x.costs.contingency), money(x.expenses), money(x.net), money(x.cashNeeded), `${x.quoteVerified ? 'quote in writing' : 'quote not confirmed'}; ${x.costsVerified ? 'costs are quotes' : 'costs are estimates'}`];
+    const optSel = (key, cur) => `<select data-same="${key}">${state.options.map((o) => `<option value="${esc(o.id)}" ${o === cur ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>`;
+    const intro = `<section class="panel same-turnout" aria-labelledby="st-title"><h2 id="st-title">Compare two options at the same turnout</h2>
+      <p class="hint">What the extra cost of one format would take, if <b>both drew the same number of people</b>. It does not assume a format (such as a shotgun start) brings more people or a higher price: if you expect that, it is your own assumption and it is not in these numbers. Firm money only.</p>`;
+    if (!r.comparable) {
+      return `${intro}<div class="fields wi-controls"><label class="f"><span>Option</span>${optSel('a', A)}</label><label class="f"><span>Compared with</span>${optSel('b', B)}</label></div>
+      <p class="callout warn-callout st-result"><span>${esc(sameTurnoutWords(A, B, r))}</span></p></section>`;
+    }
+    const col = (x) => [x.participants + (x.flags.length ? ` (${x.requested !== x.participants ? `from ${x.requested}: ` : ''}${x.flags.map((f) => (f === 'fewer_than_already_paid' ? `fewer than the ${x.paid} already paid` : f.replace(/_/g, ' '))).join(', ')})` : ''), money(x.revenue), money(x.costs.venue), money(x.costs.perParticipant), money(x.costs.fixed), money(x.costs.separateDepositFee), money(x.costs.contingency), money(x.expenses), money(x.net), money(x.cashNeeded), `${x.quoteVerified ? 'quote in writing' : 'quote not confirmed'}; ${x.costsVerified ? 'costs are quotes' : 'costs are estimates'}`];
     const ca = col(r.a), cb = col(r.b);
     const labels = ['Participants', 'Revenue (ticket money + firm sponsorship)', 'Venue or supplier', 'Per-person costs', 'One-time costs', 'Separate deposit fee', 'Cost cushion', 'Total costs', 'Firm money left', 'Cash needed before the event', 'Where the costs come from'];
-    const optSel = (key, cur) => `<select data-same="${key}">${state.options.map((o) => `<option value="${esc(o.id)}" ${o === cur ? 'selected' : ''}>${esc(o.name)}</option>`).join('')}</select>`;
-    return `<section class="panel same-turnout" aria-labelledby="st-title"><h2 id="st-title">Compare two options at the same turnout</h2>
-      <p class="hint">What the extra cost of one format would take, if <b>both drew the same number of people</b>. It does not assume a format (such as a shotgun start) brings more people or a higher price: if you expect that, it is your own assumption and it is not in these numbers. Firm money only.</p>
+    return `${intro}
       <div class="fields wi-controls"><label class="f"><span>Option</span>${optSel('a', A)}</label><label class="f"><span>Compared with</span>${optSel('b', B)}</label>
-        <label class="f"><span>Number of people for both</span><input type="number" inputmode="numeric" step="1" min="0" data-same="n" value="${esc(sameT.n === '' ? n : sameT.n)}"></label></div>
+        <label class="f"><span>Number of ${esc(T(A).many)} for both</span><input type="number" inputmode="numeric" step="1" min="0" data-same="n" value="${esc(sameT.n === '' ? n : sameT.n)}"></label></div>
       <p class="scroll-hint hint">Scroll the table sideways to see every column.</p>
       <div class="table-wrap" tabindex="0" role="region" aria-label="Two options at the same turnout"><table class="res st-t"><thead><tr><th></th><th>${esc(A.name)}</th><th>${esc(B.name)}</th></tr></thead><tbody>
         ${labels.map((l, k) => `<tr><th>${esc(l)}</th><td class="wrap">${esc(ca[k])}</td><td class="wrap">${esc(cb[k])}</td></tr>`).join('')}
       </tbody></table></div>
-      <p class="st-result"><b>${esc(sameTurnoutWords(A, B, r))}</b></p>
-      ${r.sameCount ? '' : `<p class="callout warn-callout"><span>The two options end up at different numbers (${r.a.participants} and ${r.b.participants}) because of capacity or whole-group rules, so this is not a like-for-like comparison. Choose a number both can take: up to ${Math.min(E.maxFeasible(A), E.maxFeasible(B))}.</span></p>`}
+      <p class="st-result${r.reason === 'belowPaid' ? ' callout warn-callout' : ''}"><b>${esc(sameTurnoutWords(A, B, r))}</b></p>
+      ${r.sameCount || r.reason === 'belowPaid' ? '' : `<p class="callout warn-callout"><span>The two options end up at different numbers (${r.a.participants} and ${r.b.participants}) because of capacity or whole-group rules, so this is not a like-for-like comparison. Choose a number both can take: up to ${Math.min(E.maxFeasible(A), E.maxFeasible(B))}.</span></p>`}
       <p class="hint">“More paying people” is what the numbers need, not a forecast. Extra players are counted at each option’s own prices, group deals, minimums and deposit rules.</p></section>`;
   }
 
@@ -1088,8 +1108,9 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     }
     if (state.options.length >= 2) {
       const st = sameTurnout();
-      L.push('', '## Same turnout comparison', `_${st.A.name} and ${st.B.name}, both at ${st.n}; firm money only. It assumes neither format brings more people or a higher price._`);
-      L.push(`- Total costs: ${st.A.name} ${money(st.r.a.expenses)} (${st.r.a.participants}); ${st.B.name} ${money(st.r.b.expenses)} (${st.r.b.participants}). Firm money left: ${money(st.r.a.net)} and ${money(st.r.b.net)}.`, `- ${sameTurnoutWords(st.A, st.B, st.r)}`);
+      L.push('', '## Same turnout comparison');
+      if (!st.r.comparable) L.push(`- ${sameTurnoutWords(st.A, st.B, st.r)}`);
+      else L.push(`_${st.A.name} and ${st.B.name}, both at ${st.n} ${T(st.A).many}; firm money only. It assumes neither format brings more people or a higher price._`, `- Total costs: ${st.A.name} ${money(st.r.a.expenses)} (${st.r.a.participants}); ${st.B.name} ${money(st.r.b.expenses)} (${st.r.b.participants}). Firm money left: ${money(st.r.a.net)} and ${money(st.r.b.net)}.`, `- ${sameTurnoutWords(st.A, st.B, st.r)}`);
     }
     L.push('', '## Before anyone signs'); SIGNING_QUESTIONS.forEach((q) => L.push(`- [ ] ${q}`));
     L.push('', '_Planning estimates only. No guarantee of results; no tax or legal determinations._');

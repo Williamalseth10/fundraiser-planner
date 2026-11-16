@@ -188,6 +188,65 @@ with sync_playwright() as p:
         ctx.close()
     section('same turnout', same)
 
+    # 3b. Corrections from the independent review of b496eae (DECISION_LOG row 88)
+    def same_corrections():
+        # mixed units: the gala example compares guests with cookie-dough items
+        ctx, pg, errs = new(); pg.goto(URL); pg.click('[data-action="start-demo"][data-demo="gala"]'); pg.wait_for_timeout(300)
+        pg.goto(URL + '#results'); pg.wait_for_timeout(300)
+        st = pg.inner_text('.same-turnout')
+        check('mixed units: guests vs items is not compared at the same turnout, and says why',
+              'Not compared at the same turnout' in st and 'counts guests' in st and 'counts items' in st and 'is not the same turnout' in st and 'Side by side table below' in st, st[:700])
+        check('mixed units: no figures, number box or recovery advice shown',
+              pg.locator('.same-turnout .st-t').count() == 0 and pg.locator('[data-same="n"]').count() == 0 and 'Number of people for both' not in st
+              and 'more firm sponsorship' not in st and 'more paying' not in st, st[:700])
+        check('mixed units: the ordinary side-by-side comparison is still there', pg.locator('section.panel:has(h2:text-is("Side by side")) table').count() >= 1 and 'Cookie dough sale' in pg.inner_text('section.panel:has(h2:text-is("Side by side"))'))
+        m = memo(pg); sec = m[m.find('## Same turnout comparison'):][:600]
+        check('mixed units: board summary withholds the comparison and says why',
+              '## Same turnout comparison' in m and 'Not compared at the same turnout' in sec and 'more firm sponsorship' not in sec and 'Total costs:' not in sec and 'both at 48' not in sec, sec)
+        check('mixed units: no page errors', not errs, errs); ctx.close()
+
+        # below paid: 32 already paid, $4,000 received, compared at 0
+        ctx, pg, errs = new(); pg.goto(URL); plan = tee_and_shotgun(); plan['options'][0]['capacity'] = 100
+        open_file(pg, json.dumps(plan)); pg.goto(URL + '#results'); pg.wait_for_timeout(300)
+        check('same turnout: the number box is labelled in the option\'s own unit', 'Number of players for both' in pg.inner_text('.same-turnout'))
+        check('same turnout: the default is never below the number already paid', pg.input_value('[data-same="n"]') == '72', pg.input_value('[data-same="n"]'))
+        before = stored(pg)
+        fill(pg, '[data-same="n"]', 0); st = pg.inner_text('.same-turnout')
+        check('below paid: the engine warning is shown', 'fewer than the 32 already paid' in st, st[:700])
+        check('below paid: no recovery figures, and the conflict is explained',
+              'No recovery figures' in st and 'has 32 players already paid, more than 0' in st and 'Money already received is counted as received and is not changed' in st
+              and 'Choose at least 32 players' in st and 'more firm sponsorship' not in st and 'more paying players' not in st, st[-700:])
+        after = stored(pg)
+        check('below paid: paid sign-ups, money received and attendance numbers are not changed',
+              after['evidence'] == before['evidence'] and [o['scenarioParticipants'] for o in after['options']] == [o['scenarioParticipants'] for o in before['options']])
+        m = memo(pg); sec = m[m.find('## Same turnout comparison'):][:700]
+        check('below paid: board summary gives no recovery figures and explains', 'No recovery figures' in sec and 'more firm sponsorship' not in sec, sec)
+        fill(pg, '[data-same="n"]', 32)
+        check('below paid: at the paid number the recovery figures come back', 'more firm sponsorship' in pg.inner_text('.same-turnout') or 'nothing extra is needed' in pg.inner_text('.same-turnout'))
+        # capacity below the number paid
+        plan2 = tee_and_shotgun(); plan2['options'][1]['capacity'] = 28
+        open_file(pg, json.dumps(plan2)); pg.goto(URL + '#results'); pg.wait_for_timeout(300)
+        st = pg.inner_text('.same-turnout')
+        check('capacity below paid: said to be a capacity problem, no recovery figures',
+              'can take at most 28: check its capacity and the paid count' in st and 'Fix the capacity or the paid count' in st and 'more firm sponsorship' not in st, st[-700:])
+        m = memo(pg); sec = m[m.find('## Same turnout comparison'):][:700]
+        check('capacity below paid: board summary says so', 'can take at most 28' in sec and 'more firm sponsorship' not in sec, sec)
+        check('below paid: no page errors', not errs, errs); ctx.close()
+
+        # equal costs, unequal firm money: same course, lower price
+        ctx, pg, errs = new(); pg.goto(URL); plan = json.loads(json.dumps(CONTROL)); y = json.loads(json.dumps(plan['options'][0]))
+        y.update(id='low', name='Same course, $100 (fictional)', price=100, groupPrice=None); plan['options'].append(y); plan['evidence']['paidRegistrations']['low'] = 0
+        open_file(pg, json.dumps(plan)); pg.goto(URL + '#results'); pg.wait_for_timeout(300)
+        st = pg.inner_text('.same-turnout')
+        check('equal costs: says there is no extra cost to cover and no recovery figures apply',
+              'Both cost the same' in st and 'no extra cost to cover and no recovery figures apply' in st, st[-700:])
+        check('equal costs: the firm-money difference is still reported, and why',
+              'Their firm money still differs by $' in st and 'ends up with more' in st and 'not costs' in st and 'nothing extra is needed' not in st and '$0 more' not in st, st[-700:])
+        m = memo(pg); sec = m[m.find('## Same turnout comparison'):][:800]
+        check('equal costs: board summary reports the difference without recovery figures', 'Their firm money still differs by $' in sec and 'more firm sponsorship' not in sec, sec)
+        check('equal costs: no page errors', not errs, errs); ctx.close()
+    section('same turnout corrections', same_corrections)
+
     # 4. Malformed files, save failure, phone width
     def safety():
         ctx, pg, errs = new(); pg.goto(URL); base = tee_and_shotgun(); open_file(pg, json.dumps(base)); good = stored(pg)
