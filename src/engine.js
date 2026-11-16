@@ -1004,13 +1004,18 @@
     const conflict = !likelyKnown ? 'likelyMissing' : capacityBelowPaid ? 'capacityBelowPaid' : likelyBelowPaid ? 'likelyBelowPaid' : null;
     const warnings = likely ? likely.flags.slice() : [];
     if (likelyBelowPaid && !warnings.includes('fewer_than_already_paid')) warnings.push('fewer_than_already_paid');
-    const likelyInfo = { known: likelyKnown, requested: likelyKnown ? Number(sp.middle) : null, participants: likely ? likely.participants : null, paid: paidCount, capacity: maxN, warnings, conflict };
+    const lowWarn = low ? low.flags.slice() : [];
+    if (low && low.participants < paidCount && !lowWarn.includes('fewer_than_already_paid')) lowWarn.push('fewer_than_already_paid');
+    const likelyInfo = { lowWarnings: lowWarn, known: likelyKnown, requested: likelyKnown ? Number(sp.middle) : null, participants: likely ? likely.participants : null, paid: paidCount, capacity: maxN, warnings, conflict };
 
     // 1. Minimum acceptable net proceeds: firm money at the likely number (low number shown beside it, not deciding).
-    const mBase = { key: 'minNet', value: likely ? likely.net : null, participants: likely ? likely.participants : null, lowValue: low ? low.net : null, lowParticipants: low ? low.participants : null, conflict };
+    // The low number is checked on its own (row 92): below the paid count after rounding, its figure is withheld.
+    const lowConflict = !lowKnown ? 'lowMissing' : (capacityBelowPaid || low.participants < paidCount) ? 'lowBelowPaid' : null;
+    const lowOk = !!low && !lowConflict;
+    const mBase = { key: 'minNet', value: likely ? likely.net : null, participants: likely ? likely.participants : null, lowValue: lowOk ? low.net : null, lowParticipants: low ? low.participants : null, lowRequested: lowKnown ? Number(sp.conservative) : null, lowConflict, conflict };
     if (!known(cr.minNet)) criteria.push({ ...mBase, result: 'unknown', threshold: null });
     else if (conflict) criteria.push({ ...mBase, result: 'unknown', threshold: d(ci(cr.minNet)) });
-    else criteria.push({ ...mBase, result: c(likely.net) >= ci(cr.minNet) ? 'met' : 'unmet', threshold: d(ci(cr.minNet)), lowMeets: low ? c(low.net) >= ci(cr.minNet) : null });
+    else criteria.push({ ...mBase, result: c(likely.net) >= ci(cr.minNet) ? 'met' : 'unmet', threshold: d(ci(cr.minNet)), lowMeets: lowOk ? c(low.net) >= ci(cr.minNet) : null });
 
     // 2. Maximum acceptable loss, against two named exposures: canceling after the deadline (unknown terms stay unknown)
     //    and running the event with low turnout (the lowest firm-money result at any feasible number at or above the paid count).
@@ -1072,6 +1077,7 @@
     const actions = [];
     const crit = (key) => criteria.find((q) => q.key === key);
     if (conflict) actions.push(conflict === 'likelyMissing' ? 'enterLikely' : 'resolveConflict');
+    if (crit('minNet').lowConflict === 'lowBelowPaid' && conflict !== 'capacityBelowPaid') actions.push('resolveLow');
     if (!contract.quoteVerified || !contract.cancellationKnown || contract.unresolved.length) actions.push('quote');
     if (evidence.state === 'stale' || evidence.state === 'unrecorded' || attendance.coveredBy === 'notCovered') actions.push('reconfirm');
     if (cash.short > 0 && !cash.fundingConfirmed) actions.push('cash');

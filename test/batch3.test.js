@@ -219,3 +219,26 @@ test('a deliberate zero with nobody paid is judged as zero', () => {
   assert.equal(r.attendance.coveredBy, 'none');
   assert.ok(!r.actions.includes('resolveConflict') && !r.actions.includes('enterLikely'));
 });
+
+// ---- row 92: the low number is checked on its own ----
+test('low number below the paid count: its figure is withheld; a valid likely number can still meet', () => {
+  const s = control(); s.criteria = { minNet: 0 }; const o = s.options[0];
+  o.scenarioParticipants.conservative = 0; // likely stays 72; 32 paid, $4,000 received
+  const before = clone(s), r = E.readiness(s, o, TODAY), m = crit(r, 'minNet');
+  assert.equal(m.result, 'met'); assert.equal(m.participants, 72);   // the likely number is valid
+  assert.equal(m.lowConflict, 'lowBelowPaid'); assert.equal(m.lowValue, null); assert.equal(m.lowMeets, null);
+  assert.equal(m.lowRequested, 0); assert.equal(m.lowParticipants, 0);
+  assert.ok(r.likely.lowWarnings.includes('fewer_than_already_paid'));
+  assert.ok(r.actions.includes('resolveLow'));
+  assert.equal(r.cash.inHand, 5000); assert.deepEqual(s, before);
+  // after rounding: 31 with foursomes is 28, below 32: withheld; 33 is 32: shown
+  o.scenarioParticipants.conservative = 31; assert.equal(crit(E.readiness(s, o, TODAY), 'minNet').lowConflict, 'lowBelowPaid');
+  o.scenarioParticipants.conservative = 33; const ok = crit(E.readiness(s, o, TODAY), 'minNet');
+  assert.equal(ok.lowConflict, null); assert.equal(ok.lowValue, E.project(o, 33, E.firmContext(s, o)).net);
+  // blank, null, missing low: not entered, never 0
+  for (const v of ['', null, undefined]) {
+    if (v === undefined) delete o.scenarioParticipants.conservative; else o.scenarioParticipants.conservative = v;
+    const q = crit(E.readiness(s, o, TODAY), 'minNet');
+    assert.equal(q.lowConflict, 'lowMissing', String(v)); assert.equal(q.lowValue, null); assert.equal(q.result, 'met');
+  }
+});

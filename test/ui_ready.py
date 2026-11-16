@@ -229,6 +229,54 @@ with sync_playwright() as p:
         check('conflicts: no page errors', not errs, errs); ctx.close()
     section('conflicts', conflicts)
 
+    # 8. Row 92: the low number on its own; a blank scenario number is never shown as a deliberate 0
+    def qualifications():
+        ctx, pg, errs = new(); pg.goto(URL)
+        def load(edit, extra=None):
+            s = plan(criteria={'minNet': 0}); edit(s, s['options'][0])
+            if extra: extra(s)
+            open_file(pg, json.dumps(s)); results_page(pg); return s
+        def in_print(sel):
+            pg.emulate_media(media='print'); v = pg.is_visible(sel) and pg.inner_text(sel); pg.emulate_media(media='screen'); return v or ''
+        # 1. low 0, likely 72, 32 paid
+        load(lambda s, o: o['scenarioParticipants'].update(conservative=0)); c = card(pg, 'golf')
+        check('low 0 with 32 paid: the likely number still meets the minimum', 'Met: Smallest amount worth raising: $0.' in c and 'it leaves $5,020' in c, c[:500])
+        check('low 0 with 32 paid: the low figure is withheld and the conflict explained', 'Your low number (0) is below the 32 players already paid, so its figure isn’t shown.' in c and 'At your low number (0) it leaves' not in c and '$380' not in c, c[:600])
+        check('low 0 with 32 paid: listed as uncertain, with a next step', 'The numbers conflict: your low number (0) is below the 32 players already paid.' in c and 'Fix the low number or the paid count' in c)
+        m = memo(pg); ms = memo_section(m, 'Shotgun golf day (fictional quote)')
+        check('low 0 with 32 paid: board summary withholds it the same way', 'so its figure isn’t shown' in ms and 'At your low number (0) it leaves' not in ms and 'Fix the low number or the paid count' in ms, ms[:700])
+        check('low 0 with 32 paid: print shows the same words', 'so its figure isn’t shown' in in_print('article.ready[data-ready="golf"]'))
+        # 2. likely blank, with a second option so the side-by-side table shows
+        def two(s):
+            o2 = json.loads(json.dumps(s['options'][0])); o2.update(id='golf2', name='Second golf option (fictional)'); o2['scenarioParticipants']['middle'] = 72
+            s['options'].append(o2); s['evidence']['paidRegistrations']['golf2'] = 0
+        load(lambda s, o: o['scenarioParticipants'].update(middle=''), two)
+        note = 'Not entered: your likely number. The status doesn’t use it, but the likely-case figures count it as 0 players, which you didn’t enter.'
+        summ = pg.inner_text('article.sum >> nth=0')
+        check('likely blank: qualified right under the status', note in summ and summ.find(note) > summ.find('Supported by current evidence'), summ[:700])
+        check('likely blank: the likely-case card says "Not entered", not a dollar figure', 'Likely case (your estimate)\nNot entered\nCounted as 0 players in the figures' in summ, summ[summ.find('Likely case'):][:200])
+        check('likely blank: "what matters most" and the per-hour figure are not worked out at 0 silently', 'Not worked out: your likely number is not entered' in summ and 'raised per hour in the likely case' not in summ and 'Biggest effect on the likely case' not in summ, summ[summ.find('Why'):][:900])
+        check('likely blank: the detailed sensitivity table says it is worked out at 0', 'Your likely number is not entered, so this is worked out at 0.' in pg.inner_text('details.detail >> nth=0'))
+        side = pg.inner_text('section.panel:has(h2:text-is("Side by side"))')
+        check('likely blank: side by side marks the status and the likely net', 'likely number not entered' in side and 'not entered (counted as 0:' in side, side[:700])
+        det = pg.inner_text('details.detail >> nth=0 >> table.sc thead')
+        check('likely blank: the scenario table header says it is counted as 0', 'number not entered: counted as 0' in det, det)
+        wi = pg.inner_text('.whatif')
+        check('likely blank: what-if says the number is not entered', 'Middle case: not entered' in wi and 'Your likely number is not entered, so this is worked out at 0 players' in wi, wi[:600])
+        c = card(pg, 'golf')
+        check('likely blank: readiness doesn’t ask to agree a minimum that is set', 'Agree with the board on the smallest amount' not in c, c[c.find('What to do next'):])
+        m = memo(pg)
+        sec = m[m.find('## Shotgun golf day (fictional quote)'):m.find('## Second golf option')]
+        check('likely blank: board summary qualifies the status and the figures', f'**{note}' in sec and 'middle not entered (counted as 0: ' in sec and 'middle not entered' in sec[sec.find('Scenario numbers are'):], sec[:900])
+        check('likely blank: print shows the qualification', note in in_print('article.sum >> nth=0'))
+        # 3. low blank: the status itself depends on it
+        load(lambda s, o: o['scenarioParticipants'].update(conservative=''))
+        lownote = 'Not entered: your low number. The status and the low-case figures count it as 0 players, which you didn’t enter.'
+        check('low blank: the low-case figure on the card says it was not entered', 'Low case not entered (counted as 0: ' in pg.inner_text('article.sum >> nth=0'), pg.inner_text('article.sum >> nth=0')[:900])
+        check('low blank: the status is qualified', lownote in pg.inner_text('article.sum >> nth=0') and lownote in memo(pg) and lownote in in_print('article.sum >> nth=0'))
+        check('qualifications: no page errors', not errs, errs); ctx.close()
+    section('qualifications', qualifications)
+
     b.close()
 
 for name, ok, detail in results:
