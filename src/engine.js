@@ -990,14 +990,27 @@
     const dec = decide(state, option);
     const firmCtx = firmContext(state, option);
     const sp = option.scenarioParticipants || {};
-    const likelyReq = sp.middle, lowReq = sp.conservative;
-    const likely = project(option, likelyReq, firmCtx), low = project(option, lowReq, firmCtx);
     const x = dec.exposure;
     const criteria = [];
+    // The likely number as entered (row 91). Blank, null or missing is UNKNOWN, never 0; a typed 0 is a real 0.
+    // After capacity and whole-group rounding it must not be below the number already paid (including a capacity below
+    // it): then the numbers conflict, and nothing that depends on them is reported as met or covered. Nothing is raised.
+    const paidCount = int(firmCtx.paidRegistrations), maxN = maxFeasible(option);
+    const likelyKnown = known(sp.middle), lowKnown = known(sp.conservative);
+    const likely = likelyKnown ? project(option, sp.middle, firmCtx) : null;
+    const low = lowKnown ? project(option, sp.conservative, firmCtx) : null;
+    const capacityBelowPaid = maxN < paidCount;
+    const likelyBelowPaid = !!likely && likely.participants < paidCount;
+    const conflict = !likelyKnown ? 'likelyMissing' : capacityBelowPaid ? 'capacityBelowPaid' : likelyBelowPaid ? 'likelyBelowPaid' : null;
+    const warnings = likely ? likely.flags.slice() : [];
+    if (likelyBelowPaid && !warnings.includes('fewer_than_already_paid')) warnings.push('fewer_than_already_paid');
+    const likelyInfo = { known: likelyKnown, requested: likelyKnown ? Number(sp.middle) : null, participants: likely ? likely.participants : null, paid: paidCount, capacity: maxN, warnings, conflict };
 
     // 1. Minimum acceptable net proceeds: firm money at the likely number (low number shown beside it, not deciding).
-    if (!known(cr.minNet)) criteria.push({ key: 'minNet', result: 'unknown', threshold: null, value: likely.net, lowValue: low.net, participants: likely.participants, lowParticipants: low.participants });
-    else criteria.push({ key: 'minNet', result: c(likely.net) >= ci(cr.minNet) ? 'met' : 'unmet', threshold: d(ci(cr.minNet)), value: likely.net, lowValue: low.net, participants: likely.participants, lowParticipants: low.participants, lowMeets: c(low.net) >= ci(cr.minNet) });
+    const mBase = { key: 'minNet', value: likely ? likely.net : null, participants: likely ? likely.participants : null, lowValue: low ? low.net : null, lowParticipants: low ? low.participants : null, conflict };
+    if (!known(cr.minNet)) criteria.push({ ...mBase, result: 'unknown', threshold: null });
+    else if (conflict) criteria.push({ ...mBase, result: 'unknown', threshold: d(ci(cr.minNet)) });
+    else criteria.push({ ...mBase, result: c(likely.net) >= ci(cr.minNet) ? 'met' : 'unmet', threshold: d(ci(cr.minNet)), lowMeets: low ? c(low.net) >= ci(cr.minNet) : null });
 
     // 2. Maximum acceptable loss, against two named exposures: canceling after the deadline (unknown terms stay unknown)
     //    and running the event with low turnout (the lowest firm-money result at any feasible number at or above the paid count).
@@ -1005,9 +1018,13 @@
     const judge = (lossCents) => (limit == null || lossCents == null ? 'unknown' : lossCents <= limit ? 'met' : 'unmet');
     const cancelLoss = x.lossIfCanceled == null ? null : c(x.lossIfCanceled);
     const runLoss = c(x.worstOnChartLoss);
+    // The low-turnout range runs from the paid count to capacity. With a capacity below the paid count that range is
+    // empty (the chart keeps only full capacity), so the low-turnout exposure can't be judged.
     const parts = [
       { key: 'cancel', result: judge(cancelLoss), loss: cancelLoss == null ? null : d(cancelLoss) },
-      { key: 'lowTurnout', result: judge(runLoss), loss: d(runLoss), participants: x.worstOnChart.participants, net: x.worstOnChart.net },
+      capacityBelowPaid
+        ? { key: 'lowTurnout', result: 'unknown', loss: null, participants: null, net: null, conflict: 'capacityBelowPaid' }
+        : { key: 'lowTurnout', result: judge(runLoss), loss: d(runLoss), participants: x.worstOnChart.participants, net: x.worstOnChart.net },
     ];
     const lossResult = limit == null ? 'unknown' : parts.some((q) => q.result === 'unmet') ? 'unmet' : parts.some((q) => q.result === 'unknown') ? 'unknown' : 'met';
     criteria.push({ key: 'maxLoss', result: lossResult, threshold: limit == null ? null : d(limit), parts });
@@ -1027,14 +1044,15 @@
     const ev = state.evidence || {};
     const evidence = evidenceStatus(state, option);
     const paid = dec.paid, namedCounted = dec.namedCounted;
-    const likelyN = likely.participants;
+    const likelyN = likely ? likely.participants : null;
     const research = (state.research && Array.isArray(state.research.links)) ? state.research.links : [];
     const reasonRecorded = research.some((l) => l && l.optionId === option.id && l.assumption === 'middle' && ((typeof l.note === 'string' && l.note.trim()) || (Array.isArray(l.researchIds) && l.researchIds.length)));
     const attendance = {
       likely: likelyN, paid, named: dec.named, namedCounted, anonymousYes: dec.definitely, evidenceState: evidence.state,
       // Counts only. "covered" compares the likely number with people who have paid, then paid plus named "yes" for the
       // current offer. Named answers are not payment; neither is a prediction.
-      coveredBy: likelyN <= paid ? 'paid' : likelyN <= paid + namedCounted ? 'paidAndNamed' : 'notCovered',
+      coveredBy: conflict ? 'unknown' : likelyN === 0 ? 'none' : likelyN <= paid ? 'paid' : likelyN <= paid + namedCounted ? 'paidAndNamed' : 'notCovered',
+      conflict,
       reasonRecorded,
     };
     const sponsor = sponsorshipCashCents(option, state.sponsorships, ['collected', 'committed']).byStatus;
@@ -1053,16 +1071,17 @@
     // Next actions, most important first. Never "approve", never "cancel", never a prediction.
     const actions = [];
     const crit = (key) => criteria.find((q) => q.key === key);
+    if (conflict) actions.push(conflict === 'likelyMissing' ? 'enterLikely' : 'resolveConflict');
     if (!contract.quoteVerified || !contract.cancellationKnown || contract.unresolved.length) actions.push('quote');
     if (evidence.state === 'stale' || evidence.state === 'unrecorded' || attendance.coveredBy === 'notCovered') actions.push('reconfirm');
     if (cash.short > 0 && !cash.fundingConfirmed) actions.push('cash');
     if (crit('minNet').result === 'unmet' || crit('maxLoss').result === 'unmet') actions.push('adjust');
     if (crit('volunteers').result !== 'met') actions.push('volunteers');
-    if (crit('minNet').result === 'unknown' || !known(cr.maxLoss)) actions.push('setCriteria');
+    if (!known(cr.minNet) || !known(cr.maxLoss)) actions.push('setCriteria');
     if (crit('decideBy').timing === 'passed' || crit('decideBy').timing === 'today') actions.push('deadline');
     actions.push('board');
 
-    return { criteria, attendance, cash, contract, missing: dec.missing, actions, status: dec.status, units: unitOf(option) };
+    return { criteria, likely: likelyInfo, attendance, cash, contract, missing: dec.missing, actions, status: dec.status, units: unitOf(option) };
   }
 
   const STATUS_LABELS = {

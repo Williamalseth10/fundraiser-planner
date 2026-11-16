@@ -157,3 +157,65 @@ test('next actions: never approve or cancel; the board decides last; no change t
   const bare = clone(D.DEMO_STATE);
   bare.options.forEach((o) => { const r = E.readiness(bare, o, TODAY); assert.equal(r.actions.at(-1), 'board'); });
 });
+
+// ---- row 91: corrections from the independent review of 887774e ----
+const withLikely = (v, edit) => { const s = control(); s.criteria = { minNet: 0, maxLoss: 100000 }; const o = s.options[0];
+  if (v === undefined) delete o.scenarioParticipants.middle; else o.scenarioParticipants.middle = v; if (edit) edit(s, o); return [s, o]; };
+
+test('likely attendance: blank, null or missing is unknown, never zero', () => {
+  for (const v of ['', null, undefined]) {
+    const [s, o] = withLikely(v), before = clone(s), r = E.readiness(s, o, TODAY), m = crit(r, 'minNet');
+    assert.equal(m.result, 'unknown', String(v)); assert.equal(m.conflict, 'likelyMissing');
+    assert.equal(m.value, null); assert.equal(m.participants, null);
+    assert.equal(r.attendance.coveredBy, 'unknown'); assert.equal(r.likely.known, false);
+    assert.ok(r.actions.includes('enterLikely')); assert.ok(!r.actions.includes('setCriteria'));
+    assert.deepEqual(s, before);                                    // nothing is written into the plan
+  }
+});
+
+test('likely attendance below the paid count: no "met", no "covered"; warnings kept; receipts untouched', () => {
+  const [s, o] = withLikely(0), before = clone(s);
+  const r = E.readiness(s, o, TODAY), m = crit(r, 'minNet');
+  assert.equal(m.result, 'unknown'); assert.equal(m.conflict, 'likelyBelowPaid');
+  assert.equal(r.attendance.coveredBy, 'unknown');
+  assert.ok(r.likely.warnings.includes('fewer_than_already_paid'));
+  assert.deepEqual([r.likely.requested, r.likely.participants, r.likely.paid], [0, 0, 32]); // not silently raised
+  assert.ok(r.actions.includes('resolveConflict'));
+  assert.equal(r.cash.inHand, 5000);                                // money actually received is kept
+  assert.deepEqual(s, before);
+  // after whole-group rounding: 33 requested with foursomes is 32, at the paid count: fine; 31 rounds to 28: conflict
+  const [s2, o2] = withLikely(33); assert.equal(crit(E.readiness(s2, o2, TODAY), 'minNet').result, 'met');
+  const [s3, o3] = withLikely(31); const r3 = E.readiness(s3, o3, TODAY);
+  assert.equal(crit(r3, 'minNet').conflict, 'likelyBelowPaid');
+  assert.ok(r3.likely.warnings.includes('rounded_down_to_whole_groups'));
+  // "fewer than paid" is surfaced even when the amount received isn't entered (project() only flags it when it is)
+  const [s4, o4] = withLikely(0, (st) => { st.evidence.paidCashReceived = {}; });
+  assert.ok(E.readiness(s4, o4, TODAY).likely.warnings.includes('fewer_than_already_paid'));
+});
+
+test('capacity below the paid count: min net and the low-turnout loss cannot be judged', () => {
+  const [s, o] = withLikely(72, (st, op) => { op.capacity = 28; });
+  const r = E.readiness(s, o, TODAY), m = crit(r, 'minNet'), l = crit(r, 'maxLoss');
+  assert.equal(m.result, 'unknown'); assert.equal(m.conflict, 'capacityBelowPaid');
+  assert.equal(r.attendance.coveredBy, 'unknown');
+  assert.ok(r.likely.warnings.includes('over_capacity'));
+  assert.equal(l.parts[1].result, 'unknown'); assert.equal(l.parts[1].conflict, 'capacityBelowPaid'); assert.equal(l.parts[1].loss, null);
+  assert.equal(l.parts[0].result, 'met');                           // the contractual cancellation exposure is still judged
+  assert.equal(l.result, 'unknown');
+  assert.ok(r.actions.includes('resolveConflict'));
+  // an over-the-limit cancellation is still "not met": a conflict never hides a real failure
+  s.criteria.maxLoss = 1; assert.equal(crit(E.readiness(s, o, TODAY), 'maxLoss').result, 'unmet');
+  // capacity below paid wins even when the likely number is blank
+  const [s2, o2] = withLikely('', (st, op) => { op.capacity = 28; });
+  assert.equal(E.readiness(s2, o2, TODAY).likely.conflict, 'likelyMissing');
+});
+
+test('a deliberate zero with nobody paid is judged as zero', () => {
+  const [s, o] = withLikely(0, (st) => { st.evidence.paidRegistrations = { golf: 0 }; st.evidence.paidCashReceived = {}; });
+  const r = E.readiness(s, o, TODAY), m = crit(r, 'minNet');
+  assert.equal(r.likely.conflict, null); assert.equal(m.participants, 0);
+  assert.equal(m.value, E.project(o, 0, E.firmContext(s, o)).net);
+  assert.equal(m.result, m.value >= 0 ? 'met' : 'unmet');
+  assert.equal(r.attendance.coveredBy, 'none');
+  assert.ok(!r.actions.includes('resolveConflict') && !r.actions.includes('enterLikely'));
+});

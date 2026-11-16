@@ -720,17 +720,28 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   function readyWords(o, r) {
     const t = T(o), many = t.many, buy = t.survey === 'buy', cr = state.criteria || {};
     const [mn, ml, vo, db] = r.criteria;
-    const crit = [];
+    const crit = [], lk = r.likely;
+    // Why the likely number can't be used (row 91). The numbers are shown as entered; nothing is raised.
+    const FLAG = { over_capacity: `capped at the capacity of ${lk.capacity}`, rounded_down_to_whole_groups: `rounded down to whole ${t.groupName || 'group'}s`, fewer_than_already_paid: `fewer than the ${lk.paid} already paid`, negative_input_set_to_zero: 'a negative number was set to 0' };
+    const words = (fl) => fl.map((f) => FLAG[f] || f.replace(/_/g, ' ')).join('; ');
+    const lkWarn = lk.warnings.length ? ` (${words(lk.warnings)})` : '';
+    const counted = lk.known && lk.requested !== lk.participants ? `${lk.requested}, counted as ${lk.participants}${lk.warnings.some((f) => f !== 'fewer_than_already_paid') ? `: ${words(lk.warnings.filter((f) => f !== 'fewer_than_already_paid'))}` : ''}` : `${lk.requested}`;
+    const conflictText = lk.conflict === 'likelyMissing' ? 'your likely number is not entered'
+      : lk.conflict === 'capacityBelowPaid' ? `the capacity entered (${lk.capacity}) is below the ${lk.paid} ${many} already paid`
+        : lk.conflict === 'likelyBelowPaid' ? `your likely number (${counted}) is below the ${lk.paid} ${many} already paid` : '';
     // 1. Minimum net proceeds (firm money, at the likely number).
     const basis = `firm money (${buy ? 'sales' : 'ticket money'} plus sponsorship collected or promised in writing), at your likely number of ${mn.participants} ${many}`;
-    crit.push([mn.result, mn.result === 'unknown'
+    crit.push([mn.result, mn.conflict
+      ? `Smallest amount worth raising: ${mn.threshold == null ? 'not set' : hm(mn.threshold)}. Can’t be judged: ${conflictText}.`
+      : mn.result === 'unknown'
       ? `Smallest amount worth raising: not set. On ${basis}, it would leave ${hm(mn.value)}.`
-      : `Smallest amount worth raising: ${hm(mn.threshold)}. On ${basis}, it leaves ${hm(mn.value)}. At your low number (${mn.lowParticipants}) it leaves ${hm(mn.lowValue)}${mn.lowMeets ? '' : ', below this amount'}.`]);
+      : `Smallest amount worth raising: ${hm(mn.threshold)}. On ${basis}, it leaves ${hm(mn.value)}.${mn.lowValue == null ? ' Your low number is not entered.' : ` At your low number (${mn.lowParticipants}) it leaves ${hm(mn.lowValue)}${mn.lowMeets ? '' : ', below this amount'}.`}${lkWarn ? ` Your likely number was ${lk.requested}, counted as ${lk.participants}${lkWarn}.` : ''}`]);
     // 2. Largest acceptable loss, two named exposures.
     const [cx, lx] = ml.parts;
     const within = (q) => (ml.threshold == null || q.result === 'unknown' ? '' : q.result === 'met' ? ' (within the limit)' : ' (over the limit)');
     const cancelText = cx.loss == null ? 'if you cancel after the deadline: unknown, because the cancellation terms are not entered' : `if you cancel after the deadline: ${hm(cx.loss)} owed and already spent${within(cx)}`;
-    const runText = `if you hold it and few come: the lowest firm-money result at ${lx.participants} ${many} or more is ${lossWords(lx.net)}${within(lx)}`;
+    const runText = lx.conflict ? `if you hold it and few come: can’t be judged, because the capacity entered (${lk.capacity}) is below the ${lk.paid} ${many} already paid`
+      : `if you hold it and few come: the lowest firm-money result at ${lx.participants} ${many} or more is ${lossWords(lx.net)}${within(lx)}`;
     crit.push([ml.result, `${ml.threshold == null ? 'Largest loss the club could accept: not set' : `Largest loss the club could accept: ${hm(ml.threshold)}`}. Exposure ${cancelText}; ${runText}.`]);
     // 3. Volunteer hours (no dollar value).
     crit.push([vo.result, vo.need == null ? 'Volunteer hours: the hours this option needs are not entered.'
@@ -744,7 +755,9 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     const a = r.attendance, cash = r.cash, k = r.contract, know = [];
     const paidW = buy ? `${a.paid} ${many} paid for` : `${a.paid} ${a.paid === 1 ? t.one : many} paid`;
     const namedW = `${a.namedCounted} named “yes” for the current offer (not payment)`;
-    know.push(a.coveredBy === 'paid' ? `Attendance: your likely number is ${a.likely} ${many}. ${cap(paidW)}, which already reaches it.`
+    know.push(a.conflict ? `Attendance: can’t be compared, because ${conflictText}. Paid sign-ups and money received are shown as entered: ${paidW}.`
+      : a.coveredBy === 'none' ? `Attendance: your likely number is 0 ${many}, as you entered it. ${cap(paidW)}.`
+      : a.coveredBy === 'paid' ? `Attendance: your likely number is ${a.likely} ${many}. ${cap(paidW)}, which already reaches it.`
       : a.coveredBy === 'paidAndNamed' ? `Attendance: your likely number is ${a.likely} ${many}. ${cap(paidW)} and ${namedW} reach it together. That is a count, not a prediction.`
         : `Attendance: your likely number is ${a.likely} ${many}. ${cap(paidW)} and ${namedW} make ${a.paid + a.namedCounted}, ${a.likely - a.paid - a.namedCounted} short of it. The likely number is your assumption, not evidence.`);
     if (a.named > a.namedCounted) know.push(`${a.named - a.namedCounted} named “yes” answers were for different or unrecorded terms and aren’t counted.`);
@@ -754,14 +767,20 @@ Report raw counts, never percentages applied to a whole school or community. Sur
 
     // What remains uncertain: the existing must-verify list plus attendance and contract dates.
     const unsure = [...r.missing];
+    if (lk.conflict === 'likelyMissing') unsure.push('Your likely number is not entered, so nothing that depends on it can be judged.');
+    if (lk.conflict === 'likelyBelowPaid') unsure.push(`The numbers conflict: ${conflictText}.`); // a capacity below the paid count is already in the must-verify list
     if (a.coveredBy === 'notCovered') unsure.push(`Whether ${a.likely} ${many} will actually ${buy ? 'be bought' : 'come and pay'}: paid plus named “yes” is ${a.paid + a.namedCounted}.`);
-    if (!a.reasonRecorded) unsure.push('No reason is recorded for your likely number. Add one on the “Plan for low, likely and high” step.');
+    if (!a.reasonRecorded && lk.known) unsure.push('No reason is recorded for your likely number. Add one on the “Plan for low, likely and high” step.');
     const dates = k.unresolved.filter((u) => !/owed if you cancel/i.test(u));
     if (dates.length) unsure.push(`Contract details not entered: ${dates.join(', ')}.`);
     if (k.passed.length) unsure.push(`Contract dates passed or due today: ${k.passed.join(', ')}. Check with the ${t.venue} what this means now.`);
 
     // What to do next.
     const next = r.actions.map((key) => ({
+      enterLikely: 'Enter your likely number on the “Plan for low, likely and high” step. Blank is treated as unknown, not 0.',
+      resolveConflict: lk.conflict === 'capacityBelowPaid'
+        ? `Check the capacity with the ${t.venue} and the paid count in your records: ${lk.paid} are paid but the capacity entered is ${lk.capacity}. The planner won’t change either number for you.`
+        : `Fix the likely number or the paid count: ${lk.paid} ${many} are already paid, so the likely number can’t be lower. The planner won’t raise it for you.`,
       quote: k.quoteVerified
         ? `Get the missing contract details from the ${t.venue} in writing: ${[!k.cancellationKnown && 'what you would owe if you cancel', ...dates.map((x) => x.toLowerCase())].filter(Boolean).join(', ')}.`
         : `Get the written ${t.venue} quote${k.cancellationKnown ? '' : ', including what you would owe if you cancel'}${dates.length ? `, and these details: ${dates.join(', ').toLowerCase()}` : ''}.`,

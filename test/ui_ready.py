@@ -191,6 +191,44 @@ with sync_playwright() as p:
             check(f'{w}px {scheme}: no page errors', not errs, errs); ctx.close()
     section('layout', layout)
 
+    # 7. Corrections from the independent review of 887774e (row 91): likely number missing, below paid, capacity below paid
+    def conflicts():
+        ctx, pg, errs = new(); pg.goto(URL)
+        def load(edit):
+            s = plan(criteria={'minNet': 0, 'maxLoss': 100000}); edit(s, s['options'][0]); st = open_file(pg, json.dumps(s)); results_page(pg); return st, s
+        def agree(label):
+            m = memo(pg); ms = memo_section(m, 'Shotgun golf day (fictional quote)'); screen = crit_items(pg, 'golf')
+            nxt = pg.eval_on_selector_all('article.ready[data-ready="golf"] ol.next li', 'els => els.map(e => e.innerText.trim())')
+            ok = all(f'- [{w}] {t}' in ms for w, t in screen) and all(f'. {x}' in ms for x in nxt)
+            pg.emulate_media(media='print'); ok = ok and crit_items(pg, 'golf') == screen; pg.emulate_media(media='screen')
+            check(f'{label}: screen, board summary and print agree', ok, (screen, ms[:700]))
+        # 1. likely 0 with 32 paid
+        st, s = load(lambda s, o: o['scenarioParticipants'].update(middle=0)); c = card(pg, 'golf')
+        check('likely 0 with 32 paid: minimum is not "met", it can’t be judged', 'Unknown: Smallest amount worth raising: $0. Can’t be judged: your likely number (0) is below the 32 players already paid.' in c and 'Met: Smallest amount' not in c, c[:600])
+        check('likely 0 with 32 paid: attendance is not "covered"', 'Attendance: can’t be compared' in c and 'already reaches it' not in c and 'reach it together' not in c, c[c.find('What we know'):][:400])
+        check('likely 0 with 32 paid: paid and money received shown as entered, nothing raised', '32 players paid' in c and stored(pg)['options'][0]['scenarioParticipants']['middle'] == 0 and stored(pg)['evidence']['paidCashReceived'] == s['evidence']['paidCashReceived'])
+        check('likely 0 with 32 paid: a next step to resolve it', 'Fix the likely number or the paid count: 32 players are already paid' in c)
+        agree('likely 0 with 32 paid')
+        # 2. likely blank, and missing altogether
+        for label, edit in [('likely blank', lambda s, o: o['scenarioParticipants'].update(middle='')), ('likely missing', lambda s, o: o['scenarioParticipants'].pop('middle'))]:
+            st, s = load(edit); c = card(pg, 'golf')
+            check(f'{label}: the file opens', 'could not' not in st.lower() and 'refused' not in st.lower(), st)
+            check(f'{label}: unknown, not treated as 0', 'Can’t be judged: your likely number is not entered.' in c and 'Your likely number is not entered, so nothing that depends on it can be judged.' in c and 'Enter your likely number' in c and 'Met: Smallest' not in c, c[:700])
+        agree('likely blank')
+        # 3. capacity 28 with 32 paid
+        st, s = load(lambda s, o: o.update(capacity=28)); c = card(pg, 'golf')
+        check('capacity 28 with 32 paid: minimum can’t be judged', 'Can’t be judged: the capacity entered (28) is below the 32 players already paid.' in c and 'Met: Smallest' not in c, c[:600])
+        check('capacity 28 with 32 paid: low-turnout loss can’t be judged; the loss limit is not "met"', 'if you hold it and few come: can’t be judged' in c and 'Unknown: Largest loss' in c, c[:900])
+        check('capacity 28 with 32 paid: the conflict is listed and a next step names both numbers', '32 people or items are already paid for, but the capacity entered is 28' in c and 'Check the capacity with the course and the paid count in your records: 32 are paid but the capacity entered is 28' in c)
+        agree('capacity 28 with 32 paid')
+        # 4. a valid zero with nobody paid
+        def zero(s, o): o['scenarioParticipants']['middle'] = 0; s['evidence']['paidRegistrations']['golf'] = 0; s['evidence']['paidCashReceived'] = {}
+        st, s = load(zero); c = card(pg, 'golf')
+        check('valid 0 with nobody paid: judged at 0, not called unknown', ('Met: Smallest amount worth raising: $0.' in c or 'Not met: Smallest amount worth raising: $0.' in c) and 'likely number of 0 players' in c and 'Can’t be judged' not in c and 'your likely number is 0 players, as you entered it' in c, c[:800])
+        agree('valid 0 with nobody paid')
+        check('conflicts: no page errors', not errs, errs); ctx.close()
+    section('conflicts', conflicts)
+
     b.close()
 
 for name, ok, detail in results:
