@@ -1,0 +1,397 @@
+{
+  "schemaVersion": 1,
+  "isDemo": false,
+  "eventName": "FICTIONAL PRACTICE — research analogues (made-up records, real-plan shape)",
+  "settings": {
+    "fundraisingTarget": 5000,
+    "volunteerHourValue": null
+  },
+  "snapshot": {
+    "format": "Shotgun golf scramble, foursomes (fictional)",
+    "dateWindow": "a Saturday in May (fictional)",
+    "locationArea": "[fictional course area]",
+    "included": "golf, cart, lunch, player gift",
+    "beneficiary": "team equipment (fictional)",
+    "fallbackPrice": ""
+  },
+  "volunteerHoursAvailable": 120,
+  "scenarioSettings": {
+    "conservative": {
+      "label": "Conservative",
+      "statuses": [
+        "collected"
+      ],
+      "extraRevenuePerParticipant": 0,
+      "otherRevenue": 0,
+      "costContingencyPct": 0
+    },
+    "middle": {
+      "label": "Middle",
+      "statuses": [
+        "collected",
+        "committed"
+      ],
+      "extraRevenuePerParticipant": 0,
+      "otherRevenue": 0,
+      "costContingencyPct": 0
+    },
+    "optimistic": {
+      "label": "Optimistic",
+      "statuses": [
+        "collected",
+        "committed",
+        "hoped"
+      ],
+      "extraRevenuePerParticipant": 0,
+      "otherRevenue": 0,
+      "costContingencyPct": 0
+    }
+  },
+  "options": [
+    {
+      "id": "golf",
+      "name": "Shotgun golf day (fictional quote)",
+      "kind": "golf_shotgun",
+      "capacity": 100,
+      "groupSize": 4,
+      "wholeGroupsOnly": true,
+      "price": 125,
+      "groupPrice": 500,
+      "groupShare": 0.5,
+      "venueQuote": {
+        "flatFee": 0,
+        "perParticipant": 60,
+        "minimumParticipants": 72,
+        "minimumSpend": 0
+      },
+      "deposit": {
+        "amount": 1000,
+        "creditedTowardBill": true,
+        "refundable": false
+      },
+      "perParticipantCosts": [
+        {
+          "id": "gift",
+          "label": "Player gift",
+          "amount": 5
+        }
+      ],
+      "fixedCosts": [
+        {
+          "id": "other",
+          "label": "Prizes, signs and printing",
+          "amount": 800,
+          "paidUpfront": true
+        }
+      ],
+      "volunteerHours": 100,
+      "cancellationOwed": 4320,
+      "quoteVerified": true,
+      "costsVerified": true,
+      "upfrontFundingConfirmed": false,
+      "scenarioParticipants": {
+        "conservative": 48,
+        "middle": 72,
+        "optimistic": 100
+      }
+    }
+  ],
+  "sponsorships": [
+    {
+      "id": "sp1",
+      "label": "Collected sponsor (fictional)",
+      "amount": 1000,
+      "status": "collected",
+      "type": "cash",
+      "optionId": ""
+    },
+    {
+      "id": "sp2",
+      "label": "Written commitment (fictional)",
+      "amount": 500,
+      "status": "committed",
+      "type": "cash",
+      "optionId": ""
+    },
+    {
+      "id": "sp3",
+      "label": "Hoped-for sponsor (fictional)",
+      "amount": 500,
+      "status": "hoped",
+      "type": "cash",
+      "optionId": ""
+    }
+  ],
+  "evidence": {
+    "surveyResponses": 60,
+    "paidRegistrations": {
+      "golf": 32
+    },
+    "paidCashReceived": {
+      "golf": 4000
+    },
+    "namedHighIntent": {
+      "golf": 40
+    },
+    "surveyDefinitelyAtPrice": {
+      "golf": 0
+    },
+    "surveyProbablyAtPrice": {
+      "golf": 20
+    },
+    "offerTerms": {
+      "golf": {
+        "kind": "golf_shotgun",
+        "price": 12500,
+        "groupSize": 4,
+        "groupPrice": 50000,
+        "format": "Shotgun golf scramble, foursomes (fictional)",
+        "date": "a Saturday in May (fictional)",
+        "place": "[fictional course area]",
+        "included": "golf, cart, lunch, player gift",
+        "supports": "team equipment (fictional)"
+      }
+    }
+  },
+  "research": {
+    "audiences": [
+      {
+        "id": "a_real",
+        "name": "FICTIONAL parents",
+        "category": "parents",
+        "unit": "people",
+        "reach": 150,
+        "provenance": "observation",
+        "verification": "checked",
+        "source": "FICTIONAL roster",
+        "overlapsWith": [],
+        "optionIds": [
+          "golf"
+        ]
+      },
+      {
+        "id": "a_est",
+        "name": "FICTIONAL league guess",
+        "category": "golfers",
+        "unit": "people",
+        "reach": 30,
+        "provenance": "estimate",
+        "verification": "unchecked",
+        "source": "FICTIONAL: a friend said so",
+        "overlapsWith": [],
+        "optionIds": [
+          "golf"
+        ]
+      },
+      {
+        "id": "a_fic",
+        "name": "FICTIONAL demo group",
+        "category": "other",
+        "unit": "people",
+        "reach": 9999,
+        "provenance": "fictional",
+        "verification": "unchecked",
+        "overlapsWith": [],
+        "optionIds": [
+          "golf"
+        ]
+      }
+    ],
+    "comparables": [
+      {
+        "optionIds": [
+          "golf"
+        ],
+        "comparability": "close",
+        "sourceQuality": "official",
+        "sourceRef": "",
+        "feesNote": "",
+        "resultNote": "",
+        "differences": "",
+        "resultVerified": false,
+        "advertisedCapacity": null,
+        "resultAttendance": null,
+        "id": "c_checked",
+        "name": "FICTIONAL checked scramble",
+        "eventDate": "2026-08-10",
+        "priceSingle": 150,
+        "feesPerPerson": 0,
+        "pricingTier": "regular",
+        "included": "golf, cart, lunch",
+        "provenance": "observation",
+        "verification": "checked",
+        "sourceUrl": "https://example.org/fictional-checked",
+        "checkedDate": "2026-11-15"
+      },
+      {
+        "optionIds": [
+          "golf"
+        ],
+        "comparability": "close",
+        "sourceQuality": "official",
+        "sourceRef": "",
+        "feesNote": "",
+        "resultNote": "",
+        "differences": "",
+        "resultVerified": false,
+        "advertisedCapacity": null,
+        "resultAttendance": 500,
+        "id": "c_fic",
+        "name": "FICTIONAL ten-dollar demo",
+        "eventDate": "2026-05-01",
+        "priceSingle": 10,
+        "feesPerPerson": 0,
+        "pricingTier": "regular",
+        "provenance": "fictional",
+        "verification": "checked"
+      },
+      {
+        "optionIds": [
+          "golf"
+        ],
+        "comparability": "partial",
+        "sourceQuality": "official",
+        "sourceRef": "",
+        "feesNote": "",
+        "resultNote": "",
+        "differences": "Four players register as two duos ($600 is our arithmetic, not an offer). Age discounts exist; not the general price. \"Early registration\" date given, but no regular tier.",
+        "resultVerified": false,
+        "advertisedCapacity": null,
+        "resultAttendance": null,
+        "id": "c_duo",
+        "name": "FICTIONAL Park Fund scramble",
+        "eventDate": "2026-07-10",
+        "priceSingle": 160,
+        "priceGroup": 300,
+        "groupSize": 2,
+        "groupPriceBasis": "advertised",
+        "feesPerPerson": null,
+        "pricingTier": "unknown",
+        "included": "breakfast, boxed lunch, swag; cart wording unclear",
+        "provenance": "observation",
+        "verification": "conflicting",
+        "sourceUrl": "https://example.org/fictional-park-fund",
+        "checkedDate": "2026-11-15"
+      },
+      {
+        "optionIds": [
+          "golf"
+        ],
+        "comparability": "partial",
+        "sourceQuality": "official",
+        "sourceRef": "",
+        "feesNote": "",
+        "resultNote": "",
+        "differences": "",
+        "resultVerified": false,
+        "advertisedCapacity": null,
+        "resultAttendance": null,
+        "id": "c_derived",
+        "name": "FICTIONAL Park Fund, four players",
+        "eventDate": "2026-07-10",
+        "priceSingle": null,
+        "priceGroup": 600,
+        "groupSize": 4,
+        "groupPriceBasis": "derived",
+        "feesPerPerson": null,
+        "provenance": "observation",
+        "verification": "unchecked"
+      },
+      {
+        "optionIds": [
+          "golf"
+        ],
+        "comparability": "close",
+        "sourceQuality": "ai",
+        "sourceRef": "",
+        "feesNote": "",
+        "resultNote": "",
+        "differences": "",
+        "resultVerified": false,
+        "advertisedCapacity": null,
+        "resultAttendance": null,
+        "id": "c_ai",
+        "name": "FICTIONAL Engine 9 scramble",
+        "eventDate": "2026-06-15",
+        "location": "venue not confirmed for this edition",
+        "priceSingle": 145,
+        "feesPerPerson": null,
+        "pricingTier": "unknown",
+        "included": "18 holes, range balls, cart, snacks, lunch; dinner wording unresolved",
+        "provenance": "observation",
+        "verification": "unchecked",
+        "sourceUrl": "https://example.org/fictional-engine9"
+      },
+      {
+        "optionIds": [
+          "golf"
+        ],
+        "comparability": "not",
+        "sourceQuality": "official",
+        "sourceRef": "",
+        "feesNote": "",
+        "resultNote": "",
+        "differences": "Celebrity hospitality package, not ordinary admission.",
+        "resultVerified": false,
+        "advertisedCapacity": null,
+        "resultAttendance": null,
+        "id": "c_celebrity",
+        "name": "FICTIONAL celebrity classic",
+        "eventDate": "2026-07-20",
+        "priceSingle": null,
+        "priceGroup": 3200,
+        "groupSize": 4,
+        "groupPriceBasis": "advertised",
+        "provenance": "observation",
+        "verification": "unchecked"
+      },
+      {
+        "optionIds": [
+          "golf"
+        ],
+        "comparability": "partial",
+        "sourceQuality": "official",
+        "sourceRef": "",
+        "feesNote": "",
+        "resultNote": "",
+        "differences": "",
+        "resultVerified": false,
+        "advertisedCapacity": 144,
+        "resultAttendance": null,
+        "id": "c_future",
+        "name": "FICTIONAL 2027 invitational",
+        "eventDate": "2027-07-19",
+        "priceSingle": 380,
+        "priceGroup": 1400,
+        "groupSize": 4,
+        "groupPriceBasis": "advertised",
+        "feesPerPerson": null,
+        "pricingTier": "unknown",
+        "provenance": "observation",
+        "verification": "unchecked"
+      },
+      {
+        "optionIds": [
+          "golf"
+        ],
+        "comparability": "partial",
+        "sourceQuality": "official",
+        "sourceRef": "",
+        "feesNote": "",
+        "resultNote": "\"More than 90 golfers\" in a news report",
+        "differences": "",
+        "resultVerified": false,
+        "advertisedCapacity": null,
+        "resultAttendance": 90,
+        "id": "c_2022",
+        "name": "FICTIONAL 2022 memorial",
+        "eventDate": "2022-08-20",
+        "priceSingle": null,
+        "feesPerPerson": null,
+        "provenance": "observation",
+        "verification": "unchecked"
+      }
+    ],
+    "links": []
+  }
+}

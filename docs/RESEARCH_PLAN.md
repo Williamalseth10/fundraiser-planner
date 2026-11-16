@@ -47,13 +47,13 @@ research: {
 | B. Advertised prices separate from verified results | Price fields vs `resultAttendance` + `resultVerified` + `resultNote` | Implemented |
 | B. Source quality; differences affecting comparability | `sourceQuality`, `comparability`, `differences` | Implemented |
 | B. No demand inferred from price, capacity or "sold out" | Nothing computed from them; result shown only as recorded, marked verified or not | Implemented |
-| B. Ranges only for comparable units and inclusions, with sample size and limitations | `comparableSummary`: only events marked "close", linked to the option, with a known single price and known fees; per person, including fees; range needs ≥ 2; always shows n and the exclusions | Implemented |
+| B. Ranges only for comparable units and inclusions, with sample size and limitations | **Corrected (row 85):** no combined range. A side-by-side list per option shows each observation's price basis, date, tier, inclusions, fees, provenance, verification and source, with notes on what differs. A safe range needs structured matching of package, admission basis, tier, year and verification. | **Deferred** (the range); list implemented |
 | B. No recommended market price | None | Implemented |
 | B. Manual entry, no scraping or API | Manual | Implemented |
 | B. Safe URLs and escaped text; imports untrusted | Links only for `http(s)`, `rel="noopener noreferrer"`; everything escaped; `validatePlan` type-checks research | Implemented |
 | C. Link research to options | `optionIds` on audiences and comparables | Implemented |
 | C. Reference research for an assumption without changing it | `links` with the current value shown read-only | Implemented |
-| C. Sourced vs organizer estimate vs fictional | `researchKind`: fictional (example plan), sourced (has a source), estimate; shown as a label everywhere | Implemented |
+| C. Sourced vs organizer estimate vs fictional | **Corrected (row 85):** explicit `provenance` plus a separate `verification`; a source or URL never promotes a record; older records show "not recorded"; fictional records are kept out of real-plan summaries | Implemented |
 | C. Research summary in board summary and print | Yes | Implemented |
 | C. Progressive disclosure | Separate page; hints only | Implemented |
 | C. Add, edit, remove; empty states | Yes | Implemented |

@@ -965,12 +965,13 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       ct.items.forEach(([st, text]) => L.push(`  - ${st === 'unknown' ? '[unknown] ' : st === 'late' ? '[date passed or today] ' : ''}${text}`));
       L.push(`  - ${CONTRACT_CAVEAT}`);
       const rl = researchLines(o);
-      if (rl.length) { L.push(`- Research on file (${state.isDemo ? 'fictional; ' : ''}organizer's records; not used in any calculation):`); rl.forEach((l) => L.push(`  - ${l}`)); }
+      if (rl.length) { L.push(`- Research on file (${state.isDemo ? 'fictional; ' : ''}organizer's records; not used in any calculation):`); rl.forEach((l) => L.push(l.startsWith('  ') ? `    - ${l.trim()}` : `  - ${l}`)); }
     }
     const au = E.audienceSummary(state);
-    if (au.groups) {
+    if (au.groups || au.fictionalLeftOut) {
       L.push('', '## Audience research', '_Estimates of who could be reached, per counting unit. Sums are not unique people, and units are never added together. None of this is a sign-up or a forecast._');
-      au.units.forEach((u) => L.push(`- ${UNIT_LABEL[u.unit]}: ${u.reachSum == null ? 'reach unknown' : `${u.reachSum.toLocaleString('en-US')} estimated reach`} across ${u.groups} group${u.groups === 1 ? '' : 's'}${u.reachUnknown ? ` (${u.reachUnknown} unknown)` : ''}${u.overlaps ? '; some groups overlap' : ''}.`));
+      au.units.forEach((u) => L.push(`- ${UNIT_LABEL[u.unit]}: ${u.reachSum == null ? 'reach unknown' : `${u.reachSum.toLocaleString('en-US')} estimated reach`} across ${u.groups} group${u.groups === 1 ? '' : 's'}${u.reachUnknown ? ` (${u.reachUnknown} unknown)` : ''}${u.overlaps ? '; some groups overlap' : ''}. Records: ${[u.observations && `${u.observations} sourced`, u.estimates && `${u.estimates} estimates`, u.unrecorded && `${u.unrecorded} without provenance`, u.fictional && `${u.fictional} fictional`].filter(Boolean).join(', ')}; ${u.unchecked} not checked${u.conflicting ? `, ${u.conflicting} conflicting` : ''}.`));
+      if (au.fictionalLeftOut) L.push(`- ${au.fictionalLeftOut} fictional group${au.fictionalLeftOut === 1 ? '' : 's'} left out of these totals.`);
       au.warnings.forEach((w) => L.push(`- ${w}`));
     }
     L.push('', '## Before anyone signs'); SIGNING_QUESTIONS.forEach((q) => L.push(`- [ ] ${q}`));
@@ -995,12 +996,20 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   }
   const UNIT_LABEL = { people: 'people', households: 'households', businesses: 'businesses', organizations: 'organizations', other: 'other units' };
   const CATEGORY_LABEL = { parents: 'Parents and guardians', alumni: 'Alumni', businesses: 'Local businesses', golfers: 'Golfers', community: 'Community group', staff: 'Coaches and staff', other: 'Other' };
-  const KIND_LABEL = { fictional: 'Fictional example', sourced: 'Sourced observation', estimate: 'Organizer estimate' };
-  const QUALITY_LABEL = { official: 'Organizer’s own published page or flyer', secondhand: 'Secondhand (news, social post, someone told us)', personal: 'Our own experience', unknown: 'Not recorded' };
+  // Provenance (where it comes from) and verification (whether anyone checked it) are separate choices (row 85).
+  const KIND_LABEL = { fictional: 'Fictional example', observation: 'Sourced observation', estimate: 'Organizer estimate', unrecorded: 'Provenance not recorded (older record)' };
+  const PROV_CHOICES = [['observation', 'Sourced observation (seen in a source)'], ['estimate', 'Organizer estimate'], ['fictional', 'Fictional example']];
+  const VER_LABEL = { unchecked: 'Not checked against the source', checked: 'Checked against the source', conflicting: 'Unresolved or conflicting' };
+  const QUALITY_LABEL = { official: 'Organizer’s own published page or flyer', secondhand: 'Secondhand (news, social post, someone told us)', ai: 'AI or search summary (source not opened)', personal: 'Our own experience', unknown: 'Not recorded' };
+  const BASIS_LABEL = { unknown: 'Not recorded', advertised: 'Advertised as a group offer', derived: 'My own arithmetic (not an advertised offer)' };
   const COMPARABILITY_LABEL = { unknown: 'Not judged yet', close: 'Close: same kind, units and inclusions', partial: 'Partly: some differences matter', not: 'Not comparable' };
   const TIER_LABEL = { unknown: 'Not recorded', early: 'Early-bird', regular: 'Regular', single: 'Only one price offered' };
   const ASSUMPTION_LABEL = { price: 'Price per person or item', groupPrice: 'Group price', capacity: 'Capacity', conservative: 'Low (conservative) number', middle: 'Likely (middle) number', optimistic: 'High (optimistic) number', sponsorship: 'Sponsorship', costs: 'Costs', other: 'Something else' };
-  const kindBadge = (rec) => { const k = E.researchKind(state, rec); return `<span class="kind kind-${k}">${esc(KIND_LABEL[k])}</span>`; };
+  const kindBadge = (rec) => { const k = E.researchKind(state, rec), v = E.researchVerification(rec); return `<span class="kind kind-${k}">${esc(KIND_LABEL[k])}</span> <span class="kind ver-${v}">${esc(VER_LABEL[v])}</span>`; };
+  // Provenance and verification boxes. An older record with no provenance shows that honestly instead of a default.
+  const provSel = (p, rec) => `<label class="f"><span>Where this comes from</span><select data-path="${p}.provenance">${PROVENANCES_UI(rec).map(([v, l]) => `<option value="${esc(v)}" ${v === (rec.provenance || '') ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></label>`;
+  const PROVENANCES_UI = (rec) => (PROV_CHOICES.some(([v]) => v === rec.provenance) ? PROV_CHOICES : [['', 'Not recorded (older record): choose one']].concat(PROV_CHOICES));
+  const verSel = (p) => sel(p + '.verification', 'Checked?', Object.entries(VER_LABEL));
   const countText = (v, unit) => (v == null || v === '' ? 'unknown' : `${Number(v).toLocaleString('en-US')} ${unit || ''}`.trim());
   // Only plain web links become clickable; anything else (javascript:, data:, file:) is shown as text, escaped.
   const safeUrl = (u) => { try { const x = new URL(String(u || '').trim()); return x.protocol === 'https:' || x.protocol === 'http:' ? x.href : null; } catch (e) { return null; } };
@@ -1034,7 +1043,8 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         ${num(p + '.reach', 'Estimated people or units you could reach', { step: 1, placeholder: 'unknown', help: 'Your estimate of who could hear about it. Not a forecast of who will come.' })}
         ${num(p + '.contacted', 'Actually contacted so far', { step: 1, placeholder: 'unknown' })}
         ${num(p + '.responded', 'Survey responses from this group', { step: 1, placeholder: 'unknown', help: 'Kept here only. The plan’s own survey totals are on step 8.' })}
-        ${txtIn(p + '.source', 'Where the number comes from', { wide: true, max: 300, placeholder: 'e.g. roster count from the coach; leave blank if it is your own estimate' })}
+        ${provSel(p, a)}${verSel(p)}
+        ${txtIn(p + '.source', 'Where the number comes from', { wide: true, max: 300, placeholder: 'e.g. roster count from the coach' })}
         ${dateIn(p + '.sourceDate', 'Date of that source')}
       </div>
       <fieldset class="checks-set"><legend>Overlaps with (the same people may be in both)</legend>${others.length ? others.map((x) => `<label class="chk"><input type="checkbox" data-research-toggle="${p}.overlapsWith" value="${esc(x.id)}" ${(a.overlapsWith || []).includes(x.id) ? 'checked' : ''}> ${esc(x.name || 'Unnamed group')}</label>`).join('') : '<span class="muted">No other groups yet.</span>'}${missingChecks(p + '.overlapsWith', a.overlapsWith, new Set(others.map((x) => x.id)))}</fieldset>
@@ -1045,7 +1055,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   function comparableCard(c, j) {
     const p = `research.comparables.${j}`;
     const price = c.priceSingle == null || c.priceSingle === '' ? 'price unknown' : `${money(Number(c.priceSingle))}${c.feesPerPerson == null || c.feesPerPerson === '' ? ' + fees unknown' : Number(c.feesPerPerson) ? ` + ${money(Number(c.feesPerPerson))} fees` : ''}`;
-    const sum = `<span class="rtitle">${esc(c.name || 'Unnamed event')}</span> <span class="rfacts">${esc(price)} · ${esc((COMPARABILITY_LABEL[c.comparability] || COMPARABILITY_LABEL.unknown).split(':')[0])}</span> ${kindBadge(c)}`;
+    const sum = `<span class="rtitle">${esc(c.name || 'Unnamed event')}</span> <span class="rfacts">${esc(price)}${c.eventDate && E.isCalendarDate(c.eventDate) ? ` · ${esc(c.eventDate.slice(0, 4))}` : ''} · ${esc((COMPARABILITY_LABEL[c.comparability] || COMPARABILITY_LABEL.unknown).split(':')[0])}</span> ${kindBadge(c)}`;
     return recDetails(c.id, sum, `<div class="rcard-head"><button class="small danger" data-action="del-research" data-kind="comparables" data-j="${j}">Remove this event</button></div>
       <p class="hint">Source: ${sourceHtml(c)}</p>
       <div class="fields">
@@ -1057,25 +1067,28 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         ${txtIn(p + '.sourceRef', 'Or other source', { wide: true, max: 300, placeholder: 'e.g. printed flyer, phone call with the organizer' })}
         ${dateIn(p + '.checkedDate', 'Date you checked')}
         ${sel(p + '.sourceQuality', 'Source quality', Object.entries(QUALITY_LABEL))}
+        ${provSel(p, c)}${verSel(p)}
         ${txtIn(p + '.format', 'Format details', { max: 200, placeholder: 'e.g. 18 holes, foursomes' })}
         ${txtIn(p + '.included', 'What the price includes', { wide: true, max: 300, placeholder: 'e.g. golf, cart, lunch, gift' })}
         ${sel(p + '.pricingTier', 'Price shown is', Object.entries(TIER_LABEL))}
         ${num(p + '.priceSingle', 'Advertised price per person ($)', { placeholder: 'unknown' })}
         ${num(p + '.priceGroup', 'Advertised group price ($)', { placeholder: 'unknown' })}
         ${num(p + '.groupSize', 'Group size', { step: 1, placeholder: 'unknown' })}
+        ${sel(p + '.groupPriceBasis', 'Group price is', Object.entries(BASIS_LABEL))}
         ${num(p + '.feesPerPerson', 'Required fees per person, not in the price ($)', { placeholder: 'unknown', help: 'Processing or other required fees. Enter 0 if there are none; leave blank if you don’t know.' })}
         ${txtIn(p + '.feesNote', 'About the fees', { max: 200 })}
       </div>
       <h4 class="sub">Results (only if known)</h4>
       <p class="hint">An advertised price, a capacity or a “sold out” claim is not a result. Record a result only from something like the organizer’s report.</p>
       <div class="fields">
-        ${num(p + '.resultAttendance', 'Reported attendance', { step: 1, placeholder: 'unknown' })}
+        ${num(p + '.advertisedCapacity', 'Advertised capacity (a limit, not attendance)', { step: 1, placeholder: 'unknown' })}
+        ${num(p + '.resultAttendance', 'Reported participation (as reported; not paid registrations)', { step: 1, placeholder: 'unknown' })}
         ${txtIn(p + '.resultNote', 'Where that result comes from', { wide: true, max: 300 })}
       </div>
-      <div class="checks">${chk(p + '.resultVerified', 'This result is verified (not just a flyer, a capacity or a “sold out” claim)')}</div>
+      <div class="checks">${chk(p + '.resultVerified', 'The organizer reported this number in writing (still not a count of paid registrations)')}</div>
       <div class="fields">
         ${sel(p + '.comparability', 'How comparable to your event?', Object.entries(COMPARABILITY_LABEL))}
-        ${area(p + '.differences', 'Differences that matter', 'e.g. includes dinner, private club, nine holes, early-bird price.')}
+        ${area(p + '.differences', 'Differences and limitations', 'e.g. includes dinner, private club, nine holes, early-bird price, cart unclear, page not fully opened.')}
       </div>
       <fieldset class="checks-set"><legend>Compare with</legend>${optionChecks(p + '.optionIds', c.optionIds)}${missingChecks(p + '.optionIds', c.optionIds, new Set(state.options.map((o) => o.id)))}</fieldset>`);
   }
@@ -1094,20 +1107,45 @@ Report raw counts, never percentages applied to a whole school or community. Sur
 
   function audienceTotals() {
     const s = E.audienceSummary(state);
-    if (!s.groups) return '';
-    return `<div class="rsum"><h3 class="sub">Totals by counting unit</h3><ul class="plain">${s.units.map((u) => `<li><b>${esc(UNIT_LABEL[u.unit])}:</b> ${u.reachSum == null ? 'reach unknown' : `${u.reachSum.toLocaleString('en-US')} estimated reach`} across ${u.groups} group${u.groups === 1 ? '' : 's'}${u.reachUnknown ? ` (${u.reachUnknown} unknown, not counted)` : ''}. <i>A sum of estimates, not unique ${esc(UNIT_LABEL[u.unit])}${u.overlaps ? ': some groups overlap, so the real number is lower' : ''}.</i>${u.contactedSum != null ? ` Contacted: ${u.contactedSum.toLocaleString('en-US')}.` : ''}${u.respondedSum != null ? ` Responses: ${u.respondedSum.toLocaleString('en-US')}.` : ''}</li>`).join('')}</ul>
+    if (!s.groups && !s.fictionalLeftOut) return '';
+    const mix = (u) => [u.observations && `${u.observations} sourced`, u.estimates && `${u.estimates} estimate${u.estimates === 1 ? '' : 's'}`, u.unrecorded && `${u.unrecorded} older record${u.unrecorded === 1 ? '' : 's'} without provenance`,
+      u.fictional && `${u.fictional} fictional`, u.unchecked && `${u.unchecked} not checked`, u.conflicting && `${u.conflicting} conflicting`].filter(Boolean).join(', ');
+    return `<div class="rsum"><h3 class="sub">Totals by counting unit</h3><ul class="plain">${s.units.map((u) => `<li><b>${esc(UNIT_LABEL[u.unit])}:</b> ${u.reachSum == null ? 'reach unknown' : `${u.reachSum.toLocaleString('en-US')} estimated reach`} across ${u.groups} group${u.groups === 1 ? '' : 's'}${u.reachUnknown ? ` (${u.reachUnknown} unknown, not counted)` : ''}; ${esc(mix(u))}. <i>A sum of records, not unique ${esc(UNIT_LABEL[u.unit])}${u.overlaps ? ': some groups overlap, so the real number is lower' : ''}.</i>${u.contactedSum != null ? ` Contacted: ${u.contactedSum.toLocaleString('en-US')}.` : ''}${u.respondedSum != null ? ` Responses: ${u.respondedSum.toLocaleString('en-US')}.` : ''}</li>`).join('')}</ul>
       ${s.unitCount > 1 ? '<p class="hint">Different units are never added together: households, businesses and people are not the same thing.</p>' : ''}
+      ${s.fictionalLeftOut ? `<p class="hint">${s.fictionalLeftOut} fictional group${s.fictionalLeftOut === 1 ? ' is' : 's are'} left out of these totals.</p>` : ''}
       ${s.warnings.length ? `<ul class="plain warnlist">${s.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}</div>`;
   }
 
+  // One observation, in words: what was advertised, for whom, when, on what terms, and how sure we are.
+  const TIER_WORDS = { early: 'early-bird price', regular: 'regular price', single: 'only price offered', unknown: 'pricing tier not recorded' };
+  const BASIS_WORDS = { advertised: 'advertised', derived: 'your own arithmetic, not an advertised offer', unknown: 'basis not recorded' };
+  function obsPrice(o) {
+    const parts = [o.priceSingle != null ? `${money(o.priceSingle)} per person (advertised)` : 'individual price not recorded'];
+    if (o.priceGroup != null) parts.push(`${money(o.priceGroup)} for a group of ${o.groupSize == null ? 'unknown size' : o.groupSize} (${BASIS_WORDS[o.groupPriceBasis]})`);
+    return parts.join('; ');
+  }
+  const obsStatus = (o) => `${KIND_LABEL[o.provenance].toLowerCase()}; ${VER_LABEL[o.verification].toLowerCase()}`;
+  const COMP_WORDS = { close: 'close comparison', partial: 'partly comparable', not: 'not comparable', unknown: 'comparability not judged' };
+  function obsText(o, rec) {
+    const src = [rec && rec.sourceUrl ? String(rec.sourceUrl).trim() : '', rec && rec.sourceRef ? String(rec.sourceRef).trim() : ''].filter(Boolean).join('; ');
+    return `${o.name} (${o.eventDate ? showDate(o.eventDate) : 'date not recorded'}): ${obsPrice(o)}; ${TIER_WORDS[o.pricingTier]}; includes: ${o.included || 'not recorded'}; required fees: ${o.feesKnown ? `${money(o.feesPerPerson)} per person` : 'unknown'}`
+      + `${o.advertisedCapacity != null ? `; advertised capacity ${o.advertisedCapacity} (a limit, not attendance)` : ''}${o.reportedParticipation != null ? `; reported participation ${o.reportedParticipation} (as reported${o.reportedInWriting ? ' in writing' : ''}; not paid registrations)` : ''}`
+      + `; ${COMP_WORDS[o.comparability]}; ${obsStatus(o)}${src ? `; source: ${src}` : '; no source recorded'}${rec && rec.checkedDate ? `, checked ${showDate(rec.checkedDate)}` : ''}${rec && rec.differences ? `. Limitations: ${String(rec.differences).trim().replace(/[.\s]+$/, '')}` : ''}.`;
+  }
   function comparablesForOption(o) {
     const c = E.comparableSummary(state, o);
-    if (!c.linked) return `<li><b>${esc(o.name)}:</b> no similar events linked.</li>`;
-    return `<li><b>${esc(o.name)}:</b> ${c.linked} similar event${c.linked === 1 ? '' : 's'} linked. ${c.range ? `Observed advertised prices, per person including required fees: <b>${money(c.range.min)}–${money(c.range.max)}</b> from ${c.n} close comparisons.` : 'No price range shown.'} Your price: ${money(Number(o.price) || 0)}.
-      ${c.groups.length ? `Group prices per person: ${c.groups.map((g) => `${esc(g.name)} ${money(g.perPerson)}${g.feesKnown ? '' : ' (fees unknown)'}`).join('; ')}.` : ''}
-      ${c.excluded.length ? `<br><span class="muted">Left out: ${c.excluded.map((x) => `${esc(x.name)} (${esc(x.reason)})`).join('; ')}.</span>` : ''}
-      ${c.limitations.length ? `<br><span class="muted">Limits: ${c.limitations.map(esc).join(' ')}</span>` : ''}
-      <br><span class="muted">Advertised prices are not proof of demand, and this is not a recommended price.</span></li>`;
+    if (!c.linked && !c.fictional.length) return `<h4 class="sub">${esc(o.name)}</h4><p class="hint">No similar events linked.</p>`;
+    const rec = (id) => research().comparables.find((x) => x.id === id) || {};
+    return `<h4 class="sub">${esc(o.name)} <span class="muted">(your price: ${money(Number(o.price) || 0)})</span></h4>
+      ${c.linked ? `<p class="scroll-hint hint">Scroll the table sideways to see every column.</p><div class="table-wrap" tabindex="0" role="region" aria-label="${esc(o.name)}: similar events side by side"><table class="res obs-t"><thead><tr><th>Event</th><th>Date</th><th>Advertised price</th><th>Tier</th><th>Includes</th><th>Required fees</th><th>Status</th><th>Source</th></tr></thead><tbody>
+        ${c.observations.map((x) => `<tr data-obs="${esc(x.id)}"><td><b>${esc(x.name)}</b><br><span class="muted">${esc(cap(COMP_WORDS[x.comparability]))}</span></td><td>${x.eventDate ? esc(showDate(x.eventDate)) : 'not recorded'}</td>
+          <td>${esc(obsPrice(x))}${x.advertisedCapacity != null ? `<br><span class="muted">capacity ${x.advertisedCapacity} (a limit, not attendance)</span>` : ''}${x.reportedParticipation != null ? `<br><span class="muted">reported participation ${x.reportedParticipation} (not paid registrations)</span>` : ''}</td>
+          <td>${esc(TIER_WORDS[x.pricingTier])}</td><td>${esc(x.included || 'not recorded')}</td><td>${x.feesKnown ? `${money(x.feesPerPerson)} per person` : '<b>unknown</b>'}</td>
+          <td>${esc(KIND_LABEL[x.provenance])}<br><span class="${x.verification === 'checked' ? '' : 'flag'}">${esc(VER_LABEL[x.verification])}</span></td><td>${sourceHtml(rec(x.id))}${rec(x.id).checkedDate ? `<br><span class="muted">checked ${esc(showDate(rec(x.id).checkedDate))}</span>` : ''}${rec(x.id).differences ? `<br><span class="muted">${esc(rec(x.id).differences)}</span>` : ''}</td></tr>`).join('')}
+      </tbody></table></div>` : ''}
+      ${c.fictional.length ? `<p class="hint">Fictional, not compared: ${c.fictional.map((x) => esc(x.name)).join('; ')}.</p>` : ''}
+      <ul class="plain obs-notes">${c.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
+      <p class="hint">No combined price range is shown: package contents, admission, pricing tier, year and checking differ between events. Compare them line by line.</p>`;
   }
 
   function problemsBox() {
@@ -1134,10 +1172,10 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <details class="qs"><summary>Your plan’s own evidence (step 8), kept separate</summary><p class="hint">These are the counts the decision uses. Research totals above are never added to them.</p><ul class="plain">${evRows}</ul><p class="hint">Survey responses: ${Math.max(0, Math.floor(Number(ev.surveyResponses) || 0))}.</p></details>
       </section>
       <section class="panel"><h2>Similar events</h2>
-        <p class="hint">Prices and details from comparable fundraisers, entered by hand with a source. A price range appears only from events you mark as a close comparison, with a known price and known fees, compared per person including those fees. It needs at least two. It is never a recommended price.</p>
+        <p class="hint">Prices and details from comparable fundraisers, entered by hand with a source. Say where each one comes from and whether you checked it yourself: a link from a search or an AI summary is <b>not checked</b> until you open the source. Events are listed side by side; there is no combined price range, and nothing here is a recommended price.</p>
         ${r.comparables.length ? r.comparables.map((c, j) => comparableCard(c, j)).join('') : '<p class="empty">No similar events yet.</p>'}
         <div class="row-actions"><button class="small" data-action="add-research" data-kind="comparables">+ Add similar event</button></div>
-        ${r.comparables.length ? `<div class="rsum"><h3 class="sub">What the similar events show</h3><ul class="plain">${state.options.map(comparablesForOption).join('')}</ul></div>` : ''}
+        ${r.comparables.length ? `<div class="rsum"><h3 class="sub">Similar events side by side</h3>${state.options.map(comparablesForOption).join('')}</div>` : ''}
       </section>
       <section class="panel"><h2>What supports your assumptions</h2>
         <p class="hint">Point an assumption (price, capacity, your low, likely or high number) at the research behind it. This records your reasoning; it never changes the assumption.</p>
@@ -1151,13 +1189,21 @@ Report raw counts, never percentages applied to a whole school or community. Sur
   // Per option on the results page, in print and (as text) in the board summary.
   function researchLines(o) {
     const r = research(), lines = [];
-    const aud = r.audiences.filter((a) => (a.optionIds || []).includes(o.id));
-    aud.forEach((a) => lines.push(`${a.name || 'Unnamed group'}: ${countText(a.reach, UNIT_LABEL[a.unit] || 'units')} estimated reach${a.contacted != null && a.contacted !== '' ? `, ${countText(a.contacted)} contacted` : ''}${a.responded != null && a.responded !== '' ? `, ${countText(a.responded)} responses` : ''} (${KIND_LABEL[E.researchKind(state, a)].toLowerCase()}${a.source ? `: ${a.source}` : ''})${(a.overlapsWith || []).length ? '; overlaps another group' : ''}.`));
-    if (aud.length) lines.push('Audience figures are estimates of who could be reached, not sign-ups, and overlapping groups are not unique people.');
+    const counts = (a) => !!state.isDemo || E.researchKind(state, a) !== 'fictional';
+    const tag = (a) => `${KIND_LABEL[E.researchKind(state, a)].toLowerCase()}, ${VER_LABEL[E.researchVerification(a)].toLowerCase()}`;
+    const linked = r.audiences.filter((a) => (a.optionIds || []).includes(o.id));
+    const aud = linked.filter(counts), fic = linked.filter((a) => !counts(a));
+    aud.forEach((a) => lines.push(`${a.name || 'Unnamed group'}: ${countText(a.reach, UNIT_LABEL[a.unit] || 'units')} estimated reach${a.contacted != null && a.contacted !== '' ? `, ${countText(a.contacted)} contacted` : ''}${a.responded != null && a.responded !== '' ? `, ${countText(a.responded)} responses` : ''} (${tag(a)}${a.source ? `; source: ${a.source}` : ''})${(a.overlapsWith || []).length ? '; overlaps another group' : ''}.`));
+    if (aud.length) lines.push('Audience figures are records of who could be reached, not sign-ups, and overlapping groups are not unique people.');
+    if (fic.length) lines.push(`Fictional audience records, not counted: ${fic.map((a) => a.name || 'Unnamed group').join('; ')}.`);
     const c = E.comparableSummary(state, o);
-    if (c.linked) lines.push(`Similar events: ${c.linked} linked. ${c.range ? `Observed advertised prices per person including required fees: ${money(c.range.min)}–${money(c.range.max)} (n = ${c.n} close comparisons).` : 'No price range (too few close comparisons with known price and fees).'} ${c.limitations.join(' ')} Not a recommended price.`);
+    if (c.linked || c.fictional.length) {
+      lines.push(`Similar events (${c.linked} listed side by side; no combined price range):`);
+      c.observations.forEach((x) => lines.push(`  ${obsText(x, r.comparables.find((y) => y.id === x.id))}`));
+      c.notes.forEach((n) => lines.push(`  ${n}`));
+    }
     r.links.filter((l) => l.optionId === o.id).forEach((l) => {
-      const cited = (l.researchIds || []).map((id) => recsById(id)).map((x) => (x ? x.name || 'Unnamed record' : 'a removed record'));
+      const cited = (l.researchIds || []).map((id) => recsById(id)).map((x) => (x ? `${x.name || 'Unnamed record'} (${tag(x)})` : 'a removed record'));
       lines.push(`${ASSUMPTION_LABEL[l.assumption] || 'Assumption'} (${currentAssumption(o, l.assumption)} in the plan): ${cited.length ? `cites ${cited.join(', ')}` : 'no research cited yet'}${l.note ? `. "${l.note}"` : ''}`);
     });
     const broken = E.researchProblems(state).filter((p) => p.missingId === o.id || (p.kind === 'link' && (r.links.find((l) => l.id === p.recordId) || {}).optionId === o.id));
@@ -1284,7 +1330,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <dl class="statuses">${Object.keys(STATUS_MEANING).map((k) => `<dt><span class="badge ${statusClass(k)}"><i aria-hidden="true">${statusIcon(k)}</i>${esc(E.STATUS_LABELS[k])}</span></dt><dd>${esc(STATUS_MEANING[k])}</dd>`).join('')}</dl>
         <p><b>Firm money</b> means ticket or sales money plus sponsorship that is collected or promised in writing. Break-even uses only firm money. Add-ons, “other income” and auction or raffle estimates appear in the low, likely and high cases, labeled as your assumptions.</p>
         <p><b>What would need to change?</b> Pick an option and a number to see how much more firm sponsorship would cover costs or reach your goal, and how many people would, but only when more people actually help. You can compare prices you type in at the same number. It can’t know whether people would still come at a different price. Nothing changes your plan unless you choose <b>Use … in my plan</b> and confirm.</p>
-        <p><b>Research</b> (optional, from the menu): keep audience sizes and similar events’ prices with their sources, and note which research supports an assumption. It never changes a number, a status or your survey totals. Unknown stays unknown, groups in different units are never added together, and a price range appears only from at least two close comparisons; it is never a recommended price.</p>
+        <p><b>Research</b> (optional, from the menu): keep audience sizes and similar events’ prices with their sources, and note which research supports an assumption. It never changes a number, a status or your survey totals. Each record says where it comes from (sourced, your estimate, or fictional) and whether you checked it. Unknown stays unknown, groups in different units are never added together, and similar events are listed side by side with no combined price range; nothing is a recommended price.</p>
         <p><b>Contract dates and terms</b> (entered on the quote step) show as unknown until you fill them in. They never change the numbers, and the planner can’t remind you when it’s closed.</p>
         <p>To share with the board, use <b>Copy board summary</b> (paste into an email) or <b>Print</b>.</p>
       </section>
@@ -1471,8 +1517,8 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     }
     else if (a === 'add-research') {
       const r = ensureResearch(), k = b.dataset.kind;
-      if (k === 'audiences') r.audiences.push({ id: uid('aud_'), name: '', category: 'other', unit: 'people', reach: null, contacted: null, responded: null, source: '', sourceDate: null, overlapsWith: [], optionIds: [], notes: '' });
-      else if (k === 'comparables') r.comparables.push({ id: uid('cmp_'), name: '', eventType: '', location: '', eventDate: null, sourceUrl: '', sourceRef: '', checkedDate: null, sourceQuality: 'unknown', format: '', included: '', pricingTier: 'unknown', priceSingle: null, priceGroup: null, groupSize: null, feesPerPerson: null, feesNote: '', resultAttendance: null, resultVerified: false, resultNote: '', comparability: 'unknown', differences: '', optionIds: state.options.length === 1 ? [state.options[0].id] : [] });
+      if (k === 'audiences') r.audiences.push({ id: uid('aud_'), name: '', provenance: 'estimate', verification: 'unchecked', category: 'other', unit: 'people', reach: null, contacted: null, responded: null, source: '', sourceDate: null, overlapsWith: [], optionIds: [], notes: '' });
+      else if (k === 'comparables') r.comparables.push({ id: uid('cmp_'), name: '', provenance: 'observation', verification: 'unchecked', groupPriceBasis: 'unknown', advertisedCapacity: null, eventType: '', location: '', eventDate: null, sourceUrl: '', sourceRef: '', checkedDate: null, sourceQuality: 'unknown', format: '', included: '', pricingTier: 'unknown', priceSingle: null, priceGroup: null, groupSize: null, feesPerPerson: null, feesNote: '', resultAttendance: null, resultVerified: false, resultNote: '', comparability: 'unknown', differences: '', optionIds: state.options.length === 1 ? [state.options[0].id] : [] });
       else if (k === 'links') r.links.push({ id: uid('lnk_'), optionId: (state.options[0] || {}).id || '', assumption: 'price', researchIds: [], note: '' });
       else return;
       openRecords.add(r[k][r[k].length - 1].id); // a new record opens for editing
@@ -1637,11 +1683,12 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       if (!isObj(r)) p.push('Research must be a set of records.');
       else {
         ['audiences', 'comparables', 'links'].forEach((k) => { if (r[k] != null && !Array.isArray(r[k])) p.push(`Research "${k}" must be a list.`); });
+        const prov = { provenance: ['', ...E.PROVENANCES], verification: E.VERIFICATIONS };
         if ((r.audiences || []).some((x) => !recOk(x, ['reach', 'contacted', 'responded'], [['name', 120], ['source', 300], ['notes', 1000]], ['sourceDate'],
-          { category: Object.keys(CATEGORY_LABEL), unit: Object.keys(UNIT_LABEL) }, ['overlapsWith', 'optionIds']))) p.push('An audience research record has a bad id, number, date, kind or text.');
-        if ((r.comparables || []).some((x) => !recOk(x, ['priceSingle', 'priceGroup', 'groupSize', 'feesPerPerson', 'resultAttendance'],
+          { category: Object.keys(CATEGORY_LABEL), unit: Object.keys(UNIT_LABEL), ...prov }, ['overlapsWith', 'optionIds']))) p.push('An audience research record has a bad id, number, date, kind or text.');
+        if ((r.comparables || []).some((x) => !recOk(x, ['priceSingle', 'priceGroup', 'groupSize', 'feesPerPerson', 'resultAttendance', 'advertisedCapacity'],
           [['name', 160], ['eventType', 160], ['location', 160], ['sourceUrl', 2000], ['sourceRef', 300], ['format', 200], ['included', 300], ['feesNote', 200], ['resultNote', 300], ['differences', 1000]],
-          ['eventDate', 'checkedDate'], { sourceQuality: Object.keys(QUALITY_LABEL), pricingTier: Object.keys(TIER_LABEL), comparability: Object.keys(COMPARABILITY_LABEL) }, ['optionIds']))) p.push('A similar-event research record has a bad id, price, date, kind or text.');
+          ['eventDate', 'checkedDate'], { sourceQuality: Object.keys(QUALITY_LABEL), pricingTier: Object.keys(TIER_LABEL), comparability: Object.keys(COMPARABILITY_LABEL), groupPriceBasis: Object.keys(BASIS_LABEL), ...prov }, ['optionIds']))) p.push('A similar-event research record has a bad id, price, date, kind or text.');
         if ((r.links || []).some((x) => !recOk(x, [], [['note', 1000]], [], { assumption: Object.keys(ASSUMPTION_LABEL) }, ['researchIds']) || !(typeof x.optionId === 'string' && SAFE_ID.test(x.optionId)))) p.push('A research note on an assumption has a bad id, option or kind.');
       }
     }

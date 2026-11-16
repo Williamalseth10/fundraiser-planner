@@ -171,7 +171,9 @@
         "optionIds": [
           "golf"
         ],
-        "notes": "Two adults per player at most; some are also alumni."
+        "notes": "Two adults per player at most; some are also alumni.",
+        "provenance": "observation",
+        "verification": "unchecked"
       },
       {
         "id": "aud_alumni",
@@ -189,7 +191,9 @@
         "optionIds": [
           "golf"
         ],
-        "notes": "Households, not people. Not everyone golfs."
+        "notes": "Households, not people. Not everyone golfs.",
+        "provenance": "observation",
+        "verification": "unchecked"
       },
       {
         "id": "aud_business",
@@ -205,7 +209,9 @@
         "optionIds": [
           "golf"
         ],
-        "notes": "Possible sponsors, not players."
+        "notes": "Possible sponsors, not players.",
+        "provenance": "estimate",
+        "verification": "unchecked"
       },
       {
         "id": "aud_league",
@@ -223,7 +229,9 @@
         "optionIds": [
           "golf"
         ],
-        "notes": "Size not known yet: ask the league secretary."
+        "notes": "Size not known yet: ask the league secretary.",
+        "provenance": "estimate",
+        "verification": "unchecked"
       }
     ],
     "comparables": [
@@ -247,12 +255,16 @@
         "feesNote": "Card processing fee shown at checkout",
         "resultAttendance": null,
         "resultVerified": false,
-        "resultNote": "Flyer says \"limited to 36 teams\"; no result known.",
+        "resultNote": "Flyer says \"limited to 36 teams\"; capacity recorded above; no result known.",
         "comparability": "close",
         "differences": "Includes dinner afterwards.",
         "optionIds": [
           "golf"
-        ]
+        ],
+        "provenance": "observation",
+        "verification": "unchecked",
+        "groupPriceBasis": "advertised",
+        "advertisedCapacity": 144
       },
       {
         "id": "cmp_pta",
@@ -279,7 +291,11 @@
         "differences": "Early-bird price; regular was $140.",
         "optionIds": [
           "golf"
-        ]
+        ],
+        "provenance": "observation",
+        "verification": "checked",
+        "groupPriceBasis": "advertised",
+        "advertisedCapacity": null
       },
       {
         "id": "cmp_nine",
@@ -306,7 +322,11 @@
         "differences": "Nine holes, no cart or lunch: not the same offer.",
         "optionIds": [
           "golf"
-        ]
+        ],
+        "provenance": "observation",
+        "verification": "unchecked",
+        "groupPriceBasis": "unknown",
+        "advertisedCapacity": null
       },
       {
         "id": "cmp_country",
@@ -333,7 +353,11 @@
         "differences": "Private club, dinner and bar included.",
         "optionIds": [
           "golf"
-        ]
+        ],
+        "provenance": "observation",
+        "verification": "unchecked",
+        "groupPriceBasis": "unknown",
+        "advertisedCapacity": null
       }
     ],
     "links": [

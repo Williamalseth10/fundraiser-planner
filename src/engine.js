@@ -712,11 +712,15 @@
     };
   }
 
-  // ---------- research records (Batch 1, row 84) ----------
+  // ---------- research records (Batch 1, rows 84-85) ----------
   // Research is what the organizer found out. These functions only summarize it: they never read or change the money
   // model, the evidence counts or the scenarios, and they never forecast attendance, convert units or suggest a price.
   const RESEARCH_UNITS = ['people', 'households', 'businesses', 'organizations', 'other'];
   const AUDIENCE_CATEGORIES = ['parents', 'alumni', 'businesses', 'golfers', 'community', 'staff', 'other'];
+  // Where a record comes from (provenance) and whether anyone has checked it (verification) are separate, explicit
+  // choices (row 85). Typing a source or a URL never changes either one.
+  const PROVENANCES = ['observation', 'estimate', 'fictional'];
+  const VERIFICATIONS = ['unchecked', 'checked', 'conflicting'];
   const knownNum = (x) => x !== null && x !== undefined && x !== '' && Number.isFinite(Number(x)) && Number(x) >= 0;
   const researchOf = (state) => {
     const r = state && state.research && typeof state.research === 'object' ? state.research : {};
@@ -724,93 +728,109 @@
     return { audiences: arr(r.audiences), comparables: arr(r.comparables), links: arr(r.links) };
   };
 
-  /** Where a record comes from: 'fictional' (example plan or marked so), 'sourced' (has a source) or 'estimate'. */
+  /**
+   * Provenance of a record: 'fictional' (an example plan, or marked fictional), 'observation', 'estimate', or
+   * 'unrecorded' for records saved before provenance existed. An older record is never promoted because it has a
+   * source or a link: it stays 'unrecorded' until the organizer chooses.
+   */
   function researchKind(state, record) {
-    if ((state && state.isDemo) || (record && record.fictional === true)) return 'fictional';
-    const txt = (v) => (typeof v === 'string' ? v.trim() : '');
-    if (record && (txt(record.source) || txt(record.sourceUrl) || txt(record.sourceRef))) return 'sourced';
-    return 'estimate';
+    if ((state && state.isDemo) || (record && (record.fictional === true || record.provenance === 'fictional'))) return 'fictional';
+    if (record && (record.provenance === 'observation' || record.provenance === 'estimate')) return record.provenance;
+    return 'unrecorded';
   }
+  /** Verification: 'checked' only if the organizer chose it. Missing or unknown values read as 'unchecked'. */
+  function researchVerification(record) {
+    return record && VERIFICATIONS.includes(record.verification) ? record.verification : 'unchecked';
+  }
+  // In a real plan, fictional records are listed but never counted with real ones. In an example plan everything is
+  // fictional, so everything is summarized together and labeled fictional.
+  const countsInSummary = (state, rec) => !!(state && state.isDemo) || researchKind(state, rec) !== 'fictional';
 
   /**
    * Audience worksheet totals, PER COUNTING UNIT (never across units: households are not people, businesses are not
-   * golfers). A total is a sum of the organizer's estimates, not unique people: if any group in the unit is marked as
-   * overlapping another, the total says so. Unknown values are counted as unknown, never as 0.
+   * golfers). A total is a sum of the organizer's records, not unique people: if any group in the unit is marked as
+   * overlapping another IN THE SAME UNIT, the total says so. Unknown values are counted as unknown, never as 0.
+   * Fictional records in a real plan are left out and counted separately. Each total says how many of its groups are
+   * estimates and how many are unchecked.
    */
   function audienceSummary(state) {
-    const { audiences } = researchOf(state);
+    const all = researchOf(state).audiences;
+    const audiences = all.filter((a) => countsInSummary(state, a));
     const ids = new Set(audiences.map((a) => a.id));
+    const unitOf = (a) => (RESEARCH_UNITS.includes(a.unit) ? a.unit : 'other');
     const byUnit = new Map();
     const warnings = [];
     for (const a of audiences) {
-      const unit = RESEARCH_UNITS.includes(a.unit) ? a.unit : 'other';
-      if (!byUnit.has(unit)) byUnit.set(unit, { unit, groups: 0, reachKnown: 0, reachUnknown: 0, reachSum: 0, contactedSum: 0, contactedKnown: 0, respondedSum: 0, respondedKnown: 0, overlapping: [] });
+      const unit = unitOf(a);
+      if (!byUnit.has(unit)) byUnit.set(unit, { unit, groups: 0, reachKnown: 0, reachUnknown: 0, reachSum: 0, contactedSum: 0, contactedKnown: 0, respondedSum: 0, respondedKnown: 0, overlapping: [], estimates: 0, observations: 0, unrecorded: 0, fictional: 0, unchecked: 0, conflicting: 0 });
       const u = byUnit.get(unit);
       u.groups += 1;
+      const k = researchKind(state, a); u[{ estimate: 'estimates', observation: 'observations', unrecorded: 'unrecorded', fictional: 'fictional' }[k]] += 1;
+      const v = researchVerification(a); if (v === 'unchecked') u.unchecked += 1; if (v === 'conflicting') u.conflicting += 1;
       if (knownNum(a.reach)) { u.reachKnown += 1; u.reachSum += Math.floor(Number(a.reach)); } else u.reachUnknown += 1;
       if (knownNum(a.contacted)) { u.contactedKnown += 1; u.contactedSum += Math.floor(Number(a.contacted)); }
       if (knownNum(a.responded)) { u.respondedKnown += 1; u.respondedSum += Math.floor(Number(a.responded)); }
-      // Overlap lowers a unit's total only when the other group is counted in the SAME unit.
-      const sameUnit = (x) => { const o = audiences.find((y) => y.id === x); return o && (RESEARCH_UNITS.includes(o.unit) ? o.unit : 'other') === unit; };
-      const over = (Array.isArray(a.overlapsWith) ? a.overlapsWith : []).filter((x) => ids.has(x) && x !== a.id && sameUnit(x));
-      if (over.length) u.overlapping.push(a.id);
+      const sameUnit = (x) => { const o = audiences.find((y) => y.id === x); return o && unitOf(o) === unit; };
+      if ((Array.isArray(a.overlapsWith) ? a.overlapsWith : []).some((x) => ids.has(x) && x !== a.id && sameUnit(x))) u.overlapping.push(a.id);
       const name = a.name || 'An audience group';
       if (knownNum(a.reach) && knownNum(a.contacted) && Number(a.contacted) > Number(a.reach)) warnings.push(`${name}: more contacted (${Math.floor(Number(a.contacted))}) than the estimated reach (${Math.floor(Number(a.reach))}). Check both numbers.`);
       if (knownNum(a.contacted) && knownNum(a.responded) && Number(a.responded) > Number(a.contacted)) warnings.push(`${name}: more responses (${Math.floor(Number(a.responded))}) than people contacted (${Math.floor(Number(a.contacted))}). Check both numbers.`);
     }
-    // Overlap counts in both directions: if A says it overlaps B, B is part of that overlap too.
     for (const a of audiences) for (const b of (Array.isArray(a.overlapsWith) ? a.overlapsWith : [])) {
       const other = audiences.find((x) => x.id === b && x.id !== a.id);
       if (!other) continue;
-      const unitA = RESEARCH_UNITS.includes(a.unit) ? a.unit : 'other', unitB = RESEARCH_UNITS.includes(other.unit) ? other.unit : 'other';
-      if (unitA !== unitB) {
-        const [x, y] = [a, other].sort((p, q) => String(p.id).localeCompare(String(q.id))); // one warning per pair
-        const ux = RESEARCH_UNITS.includes(x.unit) ? x.unit : 'other', uy = RESEARCH_UNITS.includes(y.unit) ? y.unit : 'other';
-        warnings.push(`${x.name || 'A group'} (${ux}) and ${y.name || 'a group'} (${uy}) overlap but are counted in different units, so they can't be combined at all.`);
-      }
-      const u = byUnit.get(unitB); if (unitA === unitB && u && !u.overlapping.includes(other.id)) u.overlapping.push(other.id);
+      if (unitOf(a) !== unitOf(other)) {
+        const [x, y] = [a, other].sort((p, q) => String(p.id).localeCompare(String(q.id)));
+        warnings.push(`${x.name || 'A group'} (${unitOf(x)}) and ${y.name || 'a group'} (${unitOf(y)}) overlap but are counted in different units, so they can't be combined at all.`);
+      } else { const u = byUnit.get(unitOf(other)); if (u && !u.overlapping.includes(other.id)) u.overlapping.push(other.id); }
     }
-    // A total with no known values is unknown (null), never 0.
     const units = [...byUnit.values()].map((u) => ({ ...u, reachSum: u.reachKnown ? u.reachSum : null, contactedSum: u.contactedKnown ? u.contactedSum : null,
       respondedSum: u.respondedKnown ? u.respondedSum : null, unique: false, overlaps: u.overlapping.length > 0 }));
-    return { units, groups: audiences.length, unitCount: units.length, warnings: [...new Set(warnings)] };
+    return { units, groups: audiences.length, unitCount: units.length, warnings: [...new Set(warnings)], fictionalLeftOut: all.length - audiences.length };
   }
 
   /**
-   * Similar events linked to one option. A price range is shown only from events the organizer marked as a CLOSE
-   * comparison, with a known single price and known required fees, compared per person INCLUDING those fees. It needs
-   * at least two such events. Everything else is listed with the reason it was left out. Never a recommended price.
-   * Money in cents internally.
+   * Similar events linked to one option, as a side-by-side list of observations (row 85). There is deliberately NO
+   * combined price range: a safe one would need package contents, admission basis, pricing tier, event year and
+   * verification to match, which free-text records can't establish. Each observation carries its own price as
+   * advertised, admission unit, date, tier, inclusions, fee status, provenance, verification and source. Notes say
+   * what differs across the list. Fictional records in a real plan are listed separately and never mixed in.
+   * Group prices stay group prices: no per-person "equivalent" is ever shown as an advertised individual ticket.
    */
   function comparableSummary(state, option) {
-    const { comparables } = researchOf(state);
-    const linked = comparables.filter((c) => Array.isArray(c.optionIds) && c.optionIds.includes(option.id));
-    const used = [], excluded = [], limitations = [];
-    for (const c of linked) {
-      const name = c.name || 'An event';
-      if (c.comparability !== 'close') { excluded.push({ id: c.id, name, reason: c.comparability === 'not' ? 'marked not comparable' : c.comparability === 'partial' ? 'marked only partly comparable' : 'comparability not judged yet' }); continue; }
-      if (!knownNum(c.priceSingle)) { excluded.push({ id: c.id, name, reason: 'no single price recorded' }); continue; }
-      if (!knownNum(c.feesPerPerson)) { excluded.push({ id: c.id, name, reason: 'required fees unknown (enter 0 if there are none)' }); continue; }
-      used.push({ id: c.id, name, perPerson: ci(c.priceSingle) + ci(c.feesPerPerson), tier: c.pricingTier || 'unknown', verified: !!c.resultVerified });
-    }
-    const n = used.length;
-    let range = null;
-    if (n >= 2) range = { min: d(Math.min(...used.map((u) => u.perPerson))), max: d(Math.max(...used.map((u) => u.perPerson))) };
-    if (linked.length === 0) limitations.push('No similar events linked to this option.');
-    else if (n < 2) limitations.push(`A range needs at least two close comparisons with a known price and known fees; ${n} so far.`);
-    if (n > 0 && n < 5) limitations.push(`Small sample: ${n} event${n === 1 ? '' : 's'}. Advertised prices are not proof of demand.`);
-    const tiers = new Set(used.map((u) => u.tier));
-    if (tiers.has('early') && (tiers.has('regular') || tiers.has('single'))) limitations.push('Mixes early-bird and regular prices.');
-    if (tiers.has('unknown') && n > 0) limitations.push('For some events it is not recorded whether the price was early-bird or regular.');
-    // Group prices per person, separately and only where both group price and size are known; never mixed into the range.
-    const groups = linked.filter((c) => c.comparability === 'close' && knownNum(c.priceGroup) && knownNum(c.groupSize) && Number(c.groupSize) >= 2)
-      .map((c) => ({ id: c.id, name: c.name || 'An event', groupSize: Math.floor(Number(c.groupSize)), feesKnown: knownNum(c.feesPerPerson),
-        perPerson: d(Math.round(ci(c.priceGroup) / Math.floor(Number(c.groupSize))) + (knownNum(c.feesPerPerson) ? ci(c.feesPerPerson) : 0)) }));
+    const all = researchOf(state).comparables.filter((c) => Array.isArray(c.optionIds) && c.optionIds.includes(option.id));
+    const linked = all.filter((c) => countsInSummary(state, c));
+    const fictional = all.filter((c) => !countsInSummary(state, c)).map((c) => ({ id: c.id, name: c.name || 'An event' }));
+    const year = (s) => (typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) ? s.slice(0, 4) : null);
+    const observations = linked.map((c) => ({
+      id: c.id, name: c.name || 'An event', provenance: researchKind(state, c), verification: researchVerification(c),
+      eventDate: typeof c.eventDate === 'string' && c.eventDate ? c.eventDate : null, year: year(c.eventDate), checkedDate: typeof c.checkedDate === 'string' && c.checkedDate ? c.checkedDate : null,
+      priceSingle: knownNum(c.priceSingle) ? d(ci(c.priceSingle)) : null,
+      priceGroup: knownNum(c.priceGroup) ? d(ci(c.priceGroup)) : null, groupSize: knownNum(c.groupSize) ? Math.floor(Number(c.groupSize)) : null,
+      groupPriceBasis: ['advertised', 'derived'].includes(c.groupPriceBasis) ? c.groupPriceBasis : 'unknown',
+      pricingTier: ['early', 'regular', 'single'].includes(c.pricingTier) ? c.pricingTier : 'unknown',
+      feesKnown: knownNum(c.feesPerPerson), feesPerPerson: knownNum(c.feesPerPerson) ? d(ci(c.feesPerPerson)) : null,
+      included: typeof c.included === 'string' ? c.included.trim() : '', comparability: ['close', 'partial', 'not'].includes(c.comparability) ? c.comparability : 'unknown',
+      advertisedCapacity: knownNum(c.advertisedCapacity) ? Math.floor(Number(c.advertisedCapacity)) : null,
+      reportedParticipation: knownNum(c.resultAttendance) ? Math.floor(Number(c.resultAttendance)) : null, reportedInWriting: !!c.resultVerified,
+    }));
+    const notes = [];
+    if (!all.length) notes.push('No similar events linked to this option.');
+    const years = [...new Set(observations.map((o) => o.year).filter(Boolean))].sort();
+    if (years.length > 1) notes.push(`These come from different years (${years.join(', ')}): prices and packages may have changed.`);
+    if (observations.some((o) => !o.year)) notes.push('Some events have no date recorded.');
+    const tiers = new Set(observations.filter((o) => o.priceSingle != null || o.priceGroup != null).map((o) => o.pricingTier));
+    if (tiers.size > 1 || tiers.has('unknown')) notes.push('Pricing tiers differ or are not recorded (early-bird, regular or only price).');
+    const fu = observations.filter((o) => !o.feesKnown).length; if (fu) notes.push(`Required fees unknown for ${fu} of ${observations.length}.`);
+    const nc = observations.filter((o) => o.verification !== 'checked').length; if (nc) notes.push(`${nc} of ${observations.length} not checked against the source, or conflicting.`);
+    if (observations.some((o) => o.comparability !== 'close')) notes.push('Some are marked only partly comparable, not comparable, or not judged yet.');
+    if (observations.some((o) => o.priceGroup != null && o.groupPriceBasis !== 'advertised')) notes.push('Some group totals are your own arithmetic or of unknown basis, not advertised offers.');
+    if (fictional.length) notes.push(`${fictional.length} fictional record${fictional.length === 1 ? ' is' : 's are'} listed separately and not compared with real ones.`);
+    if (observations.length) notes.push('Advertised prices are not proof of demand, and none of this is a recommended price.');
     return {
-      optionId: option.id, linked: linked.length, n, range,
-      used: used.map((u) => ({ ...u, perPerson: d(u.perPerson) })), excluded, groups,
-      verifiedResults: linked.filter((c) => c.resultVerified && knownNum(c.resultAttendance)).length,
-      limitations,
+      optionId: option.id, linked: observations.length, observations, fictional, notes,
+      reportedResults: observations.filter((o) => o.reportedParticipation != null).length,
+      checked: observations.filter((o) => o.verification === 'checked').length,
     };
   }
 
@@ -847,7 +867,7 @@
     registrationCents, worstCase, cancellationExposure, roundHeadline,
     project, participantsNeeded, netCurve, sensitivity, scenarioContext, firmContext, decide, offerTerms, evidenceStatus,
     whatWouldChange, compareOptions, hypotheticalPrice, pricingMargins,
-    audienceSummary, comparableSummary, researchProblems, researchKind, RESEARCH_UNITS, AUDIENCE_CATEGORIES, contractChecklist, isCalendarDate, daysBetween, CONTRACT_DATES, CONTRACT_TEXT,
+    audienceSummary, comparableSummary, researchProblems, researchKind, researchVerification, RESEARCH_UNITS, AUDIENCE_CATEGORIES, PROVENANCES, VERIFICATIONS, contractChecklist, isCalendarDate, daysBetween, CONTRACT_DATES, CONTRACT_TEXT,
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

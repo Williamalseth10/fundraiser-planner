@@ -59,6 +59,9 @@ with sync_playwright() as p:
         pg.click('[data-action="add-research"][data-kind="audiences"]'); pg.wait_for_timeout(150)
         fill(pg, P('research.audiences.0.name'), 'Team parents (fictional)')
         fill(pg, P('research.audiences.0.reach'), 120)
+        fill(pg, P('research.audiences.0.source'), 'FICTIONAL: my own guess from last year')
+        a_ = stored(pg)['research']['audiences'][0]
+        check('typing a source does not promote an estimate (still estimate, not checked)', a_['provenance'] == 'estimate' and a_['verification'] == 'unchecked' and 'Organizer estimate' in pg.inner_text('details[data-rec] >> nth=0'), a_)
         fill(pg, P('research.audiences.0.responded'), 0)
         a0 = stored(pg)['research']['audiences'][0]
         check('audience: typed values are saved', a0['name'] == 'Team parents (fictional)' and a0['reach'] == 120, a0)
@@ -85,16 +88,21 @@ with sync_playwright() as p:
         fill(pg, P('research.comparables.0.name'), 'Rotary scramble (fictional)')
         fill(pg, P('research.comparables.0.priceSingle'), 140)
         pg.select_option(P('research.comparables.0.comparability'), 'close'); pg.wait_for_timeout(120)
+        c0 = stored(pg)['research']['comparables'][0]
+        check('a new similar event starts as a sourced observation that is NOT checked', c0['provenance'] == 'observation' and c0['verification'] == 'unchecked', c0)
         cmp_ = pg.inner_text('.research .rsum >> nth=1')
-        check('fees unknown: event is left out of any range, with the reason', 'required fees unknown' in cmp_ and 'No price range shown' in cmp_, cmp_)
+        check('fees left blank are shown as unknown, never $0', 'Required fees unknown for 1 of 1' in cmp_ and '$0 per person' not in cmp_, cmp_)
         fill(pg, P('research.comparables.0.feesPerPerson'), 0)
         pg.click('[data-action="add-research"][data-kind="comparables"]'); pg.wait_for_timeout(150)
         fill(pg, P('research.comparables.1.name'), 'PTA golf day (fictional)')
         fill(pg, P('research.comparables.1.priceSingle'), 120); fill(pg, P('research.comparables.1.feesPerPerson'), 5)
         pg.select_option(P('research.comparables.1.comparability'), 'close'); pg.wait_for_timeout(120)
         cmp_ = pg.inner_text('.research .rsum >> nth=1')
-        check('range: two close comparisons, per person including fees: $125–$140', '$125–$140' in cmp_ and 'from 2 close comparisons' in cmp_, cmp_)
-        check('range: sample size and limits shown, and never a recommended price', 'Small sample: 2 events' in cmp_ and 'not a recommended price' in cmp_, cmp_)
+        check('similar events are listed side by side, each with its own price and fees', '$140 per person (advertised)' in cmp_ and '$120 per person (advertised)' in cmp_ and '$5 per person' in cmp_, cmp_)
+        check('no combined price range is shown, even for two close, fee-known events', '$120–$140' not in cmp_ and '$125–$140' not in cmp_ and 'no combined price range' in cmp_.lower(), cmp_)
+        check('both events say they are not checked until the organizer checks them', cmp_.count('Not checked against the source') == 2, cmp_)
+        pg.select_option(P('research.comparables.1.verification'), 'checked'); pg.wait_for_timeout(150)
+        check('marking an event checked is an explicit choice, saved as such', stored(pg)['research']['comparables'][1]['verification'] == 'checked' and stored(pg)['research']['comparables'][0]['verification'] == 'unchecked')
         # assumption note
         pg.click('[data-action="add-research"][data-kind="links"]'); pg.wait_for_timeout(150)
         cids = [x['id'] for x in stored(pg)['research']['comparables']]
@@ -110,7 +118,7 @@ with sync_playwright() as p:
         # refresh
         pg.reload(); pg.wait_for_timeout(250); pg.goto(URL + '#research'); pg.wait_for_timeout(200)
         s = stored(pg)['research']
-        check('refresh keeps all research', len(s['audiences']) == 3 and len(s['comparables']) == 2 and len(s['links']) == 1 and '$125–$140' in pg.inner_text('#app'))
+        check('refresh keeps all research', len(s['audiences']) == 3 and len(s['comparables']) == 2 and len(s['links']) == 1 and '$140 per person (advertised)' in pg.inner_text('#app'))
         # delete a cited record: the broken link is shown, then removed on request
         pg.click('summary:has-text("Rotary scramble (fictional)")'); pg.wait_for_timeout(120)
         btn = '[data-action="del-research"][data-kind="comparables"][data-j="0"]'
@@ -142,7 +150,7 @@ with sync_playwright() as p:
         pg.goto(URL + '#research'); pg.wait_for_timeout(200)
         pg.click('summary:has-text("Bad link")'); pg.click('summary:has-text("Data link")'); pg.click('summary:has-text("Good link")'); pg.wait_for_timeout(150)
         hrefs = pg.eval_on_selector_all('#app a[target=_blank]', 'els => els.map(e => e.getAttribute("href"))')
-        check('only http(s) links are clickable; javascript: and data: are shown as text', hrefs == ['https://example.org/fictional?a=1&b=%22x%22'], hrefs)
+        check('only http(s) links are clickable; javascript: and data: are shown as text', len(hrefs) >= 1 and set(hrefs) == {'https://example.org/fictional?a=1&b=%22x%22'}, hrefs)
         check('links open safely (noopener noreferrer)', pg.eval_on_selector_all('#app a[target=_blank]', 'els => els.every(e => /noopener/.test(e.rel) && /noreferrer/.test(e.rel))'))
         check('unsafe links are labeled as not opened', 'not opened: only http and https links are clickable' in pg.inner_text('#app'))
         pg.goto(URL + '#results'); pg.wait_for_timeout(200); m = memo(pg)
@@ -252,8 +260,9 @@ with sync_playwright() as p:
         ctx, pg, errs = new(); pg.goto(URL); open_file(pg, EXAMPLE); pg.goto(URL + '#results'); pg.wait_for_timeout(250)
         m = memo(pg)
         check('board summary: research on file per option, labeled fictional and not used in calculations', "Research on file (fictional; organizer's records; not used in any calculation)" in m, m[m.find('Research on'):][:300])
-        check('board summary: price range with sample size and "not a recommended price"', '$125–$155 (n = 2 close comparisons)' in m and 'Not a recommended price' in m)
-        check('board summary: audience section per unit, not unique people, never added across units', '## Audience research' in m and 'Sums are not unique people' in m and 'people: 180 estimated reach' in m and '480' not in m)
+        check('board summary: similar events listed one by one with their status, no combined range', 'no combined price range' in m and 'FICTIONAL PTA charity golf day (Sep 12, 2026): $125 per person (advertised); $480 for a group of 4 (advertised); early-bird price' in m and '$125–$155' not in m, m[m.find('Similar events'):][:900])
+        check('board summary: example records are labeled fictional', 'Fictional example; checked against the source' in m or 'fictional example' in m.lower())
+        check('board summary: audience section per unit, not unique people, never added across units', '## Audience research' in m and 'Sums are not unique people' in m and 'people: 180 estimated reach' in m and '480 estimated' not in m)
         check('board summary: assumption notes show the current value and cited research', 'Price per person or item ($125 per player in the plan): cites FICTIONAL Rotary spring scramble' in m)
         pg.emulate_media(media='print')
         check('print: research section prints with each option', pg.is_visible('[data-research="golf"]') and 'Research on file' in pg.inner_text('[data-research="golf"]'))
@@ -263,6 +272,69 @@ with sync_playwright() as p:
         check('board: no page errors', not errs, errs)
         ctx.close()
     section('board summary and print', board)
+
+    # 7. Fictional analogues of real research, in a REAL plan (row 85)
+    ANALOGUES = (ROOT / 'test' / 'fixtures' / 'research-analogues-fictional.json').read_text()
+    def analogues():
+        ctx, pg, errs = new(); pg.goto(URL); st = open_file(pg, ANALOGUES)
+        check('analogues: real-plan file opens (no example banner)', 'Plan imported' in st and not pg.is_visible('#demo-banner'), st)
+        before = money_view(pg)
+        pg.goto(URL + '#research'); pg.wait_for_timeout(250)
+        t = pg.inner_text('.research .rsum >> nth=1')
+        rows = {r.get_attribute('data-obs'): r.inner_text() for r in pg.query_selector_all('tr[data-obs]')}
+        check('a partly comparable event is worded properly', 'Partly comparable' in rows.get('c_duo', ''), rows.get('c_duo'))
+        check('mixed real/fictional: the fictional $10 record is not in the real list and no $10-$150 range appears', 'c_fic' not in rows and '$10–$150' not in t and 'Fictional, not compared: FICTIONAL ten-dollar demo' in t, t[:400])
+        check('unchecked AI-provided URL: listed as a sourced observation, not checked', 'Sourced observation' in rows.get('c_ai', '') and 'Not checked against the source' in rows.get('c_ai', ''), rows.get('c_ai'))
+        check('derived group total: shown as our arithmetic, not an advertised offer', 'your own arithmetic, not an advertised offer' in rows.get('c_derived', '') and 'individual price not recorded' in rows.get('c_derived', ''), rows.get('c_derived'))
+        check('duo price is a group of 2 (advertised); no per-person equivalent shown as a ticket', '$300 for a group of 2 (advertised)' in rows.get('c_duo', '') and '$150 per person' not in rows.get('c_duo', ''), rows.get('c_duo'))
+        check('conflicting inclusions: marked unresolved, with the wording kept', 'Unresolved or conflicting' in rows.get('c_duo', '') and 'cart wording unclear' in rows.get('c_duo', ''), rows.get('c_duo'))
+        check('unknown fees shown as unknown on every row that lacks them', rows.get('c_duo', '').count('unknown') >= 1 and 'Required fees unknown for 6 of 7' in t, t)
+        check('mismatched years and tiers are called out', 'different years (2022, 2026, 2027)' in t and 'Pricing tiers differ or are not recorded' in t, t)
+        check('advertised capacity is a limit, not attendance', 'capacity 144 (a limit, not attendance)' in rows.get('c_future', ''), rows.get('c_future'))
+        check('historical participation is not paid registrations', 'reported participation 90 (not paid registrations)' in rows.get('c_2022', ''), rows.get('c_2022'))
+        check('celebrity package: not comparable, no individual price invented', 'Not comparable' in rows.get('c_celebrity', '') and 'individual price not recorded' in rows.get('c_celebrity', ''), rows.get('c_celebrity'))
+        tot = pg.inner_text('.research .rsum >> nth=0')
+        check('audience totals leave the fictional group out and show what kind of records they are', 'people: 180 estimated reach' in tot and '9,999' not in tot and '1 fictional group is left out' in tot and '1 sourced, 1 estimate, 1 not checked' in tot, tot)
+        after = money_view(pg)
+        check('analogues: every calculated figure on the results page is unchanged by research', all(before[k] == after[k] for k in ('cards', 'status', 'detail', 'whatif')))
+        res = pg.inner_text('[data-research="golf"]')
+        check('results: each observation with provenance and verification, fictional records named as not counted', 'FICTIONAL Engine 9 scramble (Jun 15, 2026): $145 per person (advertised)' in res and 'sourced observation; not checked against the source' in res and 'Fictional audience records, not counted: FICTIONAL demo group' in res and 'FICTIONAL ten-dollar demo' not in res.split('Similar events')[1].split('Fictional')[0], res[:1500])
+        m = memo(pg)
+        check('board summary: the AI-sourced event stays unchecked, with its source and limits', 'FICTIONAL Engine 9 scramble (Jun 15, 2026)' in m and 'sourced observation; not checked against the source; source: https://example.org/fictional-engine9' in m, m[m.find('Engine 9'):][:500])
+        check('board summary: derived totals, capacity and participation keep their meaning', 'your own arithmetic, not an advertised offer' in m and 'advertised capacity 144 (a limit, not attendance)' in m and 'reported participation 90 (as reported; not paid registrations)' in m)
+        check('board summary: fictional records stay out of real totals', '9,999' not in m and '1 fictional group left out of these totals' in m)
+        pg.emulate_media(media='print')
+        check('print: observations and their status print with the option', 'FICTIONAL Park Fund scramble' in pg.inner_text('[data-research="golf"]') and pg.is_visible('[data-research="golf"]'))
+        if shots: pg.pdf(path=f'{shots}/research-analogues-print.pdf')
+        pg.emulate_media(media='screen')
+        if shots: pg.goto(URL + '#research'); pg.wait_for_timeout(200); pg.screenshot(path=f'{shots}/research-analogues.png', full_page=True)
+        check('analogues: no page errors', not errs, errs)
+        ctx.close()
+    section('analogues', analogues)
+
+    # 8. A record saved by 08fed6b (no provenance or verification) is never silently upgraded
+    def legacy():
+        ctx, pg, errs = new(); pg.goto(URL)
+        plan = json.loads(CONTROL); plan['research'] = {'audiences': [{'id': 'old_a', 'name': 'Old group (fictional)', 'unit': 'people', 'category': 'parents', 'reach': 50, 'source': 'flyer', 'overlapsWith': [], 'optionIds': ['golf']}],
+            'comparables': [{'id': 'old_c', 'name': 'Old event (fictional)', 'sourceUrl': 'https://example.org/old', 'priceSingle': 120, 'feesPerPerson': 0, 'comparability': 'close', 'optionIds': ['golf']}], 'links': []}
+        st = open_file(pg, json.dumps(plan)); check('legacy: an 08fed6b-era research file opens', 'Plan imported' in st, st)
+        pg.goto(URL + '#research'); pg.wait_for_timeout(200)
+        t = pg.inner_text('#app')
+        check('legacy: records show "provenance not recorded" and "not checked", not "sourced"', t.count('Provenance not recorded (older record)') >= 2 and 'Sourced observation' not in t.split('Similar events side by side')[0], t[:800])
+        pg.click('summary:has-text("Old event (fictional)")'); pg.wait_for_timeout(150)
+        check('legacy: the provenance box asks for a choice instead of showing a default', pg.eval_on_selector(P('research.comparables.0.provenance'), 'e => e.options[e.selectedIndex].text') == 'Not recorded (older record): choose one')
+        fill(pg, P('research.comparables.0.feesNote'), 'edited (fictional)')
+        c = stored(pg)['research']['comparables'][0]
+        check('legacy: editing another field does not add provenance or verification', 'provenance' not in c and 'verification' not in c and c['feesNote'] == 'edited (fictional)', c)
+        pg.select_option(P('research.comparables.0.provenance'), 'observation'); pg.wait_for_timeout(150)
+        check('legacy: the organizer can then choose provenance explicitly', stored(pg)['research']['comparables'][0]['provenance'] == 'observation' and 'verification' not in stored(pg)['research']['comparables'][0])
+        bad = json.loads(json.dumps(plan)); bad['research']['comparables'][0]['verification'] = 'verified-by-ai'
+        st = open_file(pg, json.dumps(bad)); check('malformed verification value is refused', 'Could not import' in st, st)
+        bad = json.loads(json.dumps(plan)); bad['research']['comparables'][0]['groupPriceBasis'] = 'guess'
+        st = open_file(pg, json.dumps(bad)); check('malformed group price basis is refused', 'Could not import' in st, st)
+        check('legacy: no page errors', not errs, errs)
+        ctx.close()
+    section('legacy records', legacy)
     b.close()
 
 for n, ok, det in results: print(('PASS ' if ok else 'FAIL ') + n + ('' if ok or not det else f'  [{det}]'))

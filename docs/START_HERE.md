@@ -79,7 +79,7 @@ Download a fresh backup file whenever you've made changes you'd hate to lose.
 - **Similar events:** advertised prices, fees, what's included and where you saw it.
 - **Notes on assumptions:** which research supports, for example, your price or your likely number.
 
-Research never changes a number, a status or your survey totals. Blank means unknown. Overlapping groups are flagged, and different units are never added together. A price range appears only from at least two close comparisons with known fees, and it's never a recommended price. Don't record names or contact details.
+Research never changes a number, a status or your survey totals. For each record, say **where it comes from** (sourced, your own estimate, or fictional) and **whether you checked it**. A link from a search or an AI summary stays "not checked" until you open the source yourself. Blank means unknown. Overlapping groups are flagged, and different units are never added together. Similar events are listed side by side, each with its own price, date, tier, inclusions, fees and source. There is no combined price range, and nothing is a recommended price. Don't record names or contact details.
 
 **Contract dates and terms.** On the quote step you can enter the quote date, when it expires, when the deposit and final headcount are due, the last day to cancel, where the quote came from, and short notes. Blank boxes show as **unknown** on the results and in the board summary. Dates never change the numbers, and the planner can't remind you when it's closed. Read tiered cancellation terms and weather rules yourself. A complete list doesn't mean a contract is safe or approved.
 
