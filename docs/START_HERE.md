@@ -74,6 +74,13 @@ Download a fresh backup file whenever you've made changes you'd hate to lose.
 
 **What would need to change?** Below the answers, pick an option and a number (your low, likely or high case, or another number). It shows how much more firm sponsorship would cover costs, and separately reach your goal, and how many people or sales would, but only when more of them actually helps. You can type one or two other prices to compare them at the same number. It can't know whether people would still come at a different price, and it says so. Nothing changes your plan unless you choose **Use … in my plan** and click again to confirm. Survey answers for the old price then stop counting until you re-ask.
 
+**Research (optional).** Use **Research** in the menu to keep what you find out:
+- **Audience groups:** how many each group could reach, in its own unit (people, households, businesses), with the source.
+- **Similar events:** advertised prices, fees, what's included and where you saw it.
+- **Notes on assumptions:** which research supports, for example, your price or your likely number.
+
+Research never changes a number, a status or your survey totals. Blank means unknown. Overlapping groups are flagged, and different units are never added together. A price range appears only from at least two close comparisons with known fees, and it's never a recommended price. Don't record names or contact details.
+
 **Contract dates and terms.** On the quote step you can enter the quote date, when it expires, when the deposit and final headcount are due, the last day to cancel, where the quote came from, and short notes. Blank boxes show as **unknown** on the results and in the board summary. Dates never change the numbers, and the planner can't remind you when it's closed. Read tiered cancellation terms and weather rules yourself. A complete list doesn't mean a contract is safe or approved.
 
 ## 6. Sharing with the board

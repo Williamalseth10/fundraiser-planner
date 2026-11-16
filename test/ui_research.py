@@ -1,0 +1,270 @@
+# Browser checks for research records, Batch 1 (DECISION_LOG row 84). Run after `node scripts/build.js`:
+#   python3 test/ui_research.py [screenshot_dir]
+# Real clicks and keyboard input, each section in a fresh browser context (separate storage), fictional data only.
+# A section that throws is recorded as a failure, so this file also reports cleanly against an older build.
+import sys, json, pathlib
+from playwright.sync_api import sync_playwright
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+URL = (ROOT / 'dist' / 'booster-fundraiser-planner.html').as_uri()
+CONTROL = (ROOT / 'test' / 'fixtures' / 'golf-control-fictional.json').read_text()
+EXAMPLE = (ROOT / 'docs' / 'research-example-fictional.json').read_text()
+PRACTICE = (ROOT / 'docs' / 'practice-plan-fictional.json').read_text()
+shots = sys.argv[1] if len(sys.argv) > 1 else None
+results = []
+def check(name, cond, detail=''): results.append((name, bool(cond), detail))
+def section(name, fn):
+    try: fn()
+    except Exception as e: results.append((f'{name}: section ran to the end', False, f'{type(e).__name__}: {str(e).splitlines()[0][:200]}'))
+def P(p): return f'[data-path="{p}"]'
+def fill(pg, sel, v):
+    pg.fill(sel, str(v), timeout=5000); pg.press(sel, 'Tab'); pg.wait_for_timeout(100)
+def stored(pg): return json.loads(pg.evaluate("localStorage.getItem('bfp-plan-v1')") or 'null')
+def open_file(pg, text):
+    if not pg.is_visible('#save-panel'): pg.click('[data-action="toggle-save"]')
+    pg.set_input_files('input[data-action="import-json"]', files=[{'name': 'p.json', 'mimeType': 'application/json', 'buffer': text.encode()}])
+    pg.wait_for_timeout(300); st = pg.inner_text('#status'); pg.click('[data-action="toggle-save"]'); return st
+def memo(pg):
+    pg.evaluate("""() => { window.__copied = null;
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: (t) => { window.__copied = t; return Promise.resolve(); } } });
+      document.execCommand = () => { const el = document.activeElement; window.__copied = el && el.value; return true; }; }""")
+    pg.click('[data-action="copy-memo"]'); pg.wait_for_timeout(120); return pg.evaluate('window.__copied') or ''
+def money_view(pg):  # everything on the results page that comes from the calculations
+    pg.goto(URL + '#results'); pg.wait_for_timeout(250)
+    return {k: pg.inner_text(sel) for k, sel in [('cards', 'article.sum .cards'), ('status', 'article.sum .status-line'), ('detail', 'details.detail table'),
+            ('verify', 'article.sum'), ('whatif', '.whatif .wi-cards')]}
+def no_hscroll(pg):
+    sw, cw = pg.evaluate('[document.documentElement.scrollWidth, document.documentElement.clientWidth]'); return sw <= cw + 1
+FAULTS = """(() => { const orig = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (k, v) {
+    if (k !== '__fault') { let f = null; try { f = JSON.parse(window.sessionStorage.getItem('__fault') || 'null'); } catch (e) {}
+      if (f && (f.all || (f.keys || []).includes(k))) throw new DOMException('Synthetic quota (test)', 'QuotaExceededError'); }
+    return orig.call(this, k, v); }; })();"""
+
+with sync_playwright() as p:
+    b = p.chromium.launch()
+    def new(**kw):
+        ctx = b.new_context(viewport=kw.pop('viewport', {'width': 1280, 'height': 900}), accept_downloads=True, **kw)
+        if kw.get('faults'): pass
+        pg = ctx.new_page(); errs = []; pg.on('pageerror', lambda e: errs.append(str(e))); return ctx, pg, errs
+
+    # 1. Entering research by hand: empty states, units, unknown vs zero, overlap, prices and fees, add/edit/delete
+    def entry():
+        ctx, pg, errs = new(); pg.goto(URL); open_file(pg, CONTROL)
+        before = money_view(pg); evidence_before = stored(pg)['evidence']
+        pg.click('header.site a[data-nav="research"]'); pg.wait_for_function("location.hash === '#research'")
+        t = pg.inner_text('#app')
+        check('research page: reached from the menu, says it changes no numbers', 'Nothing on this page changes your numbers' in t)
+        check('research page: clear empty states', 'No audience groups yet' in t and 'No similar events yet' in t and 'No notes yet' in t)
+        pg.click('[data-action="add-research"][data-kind="audiences"]'); pg.wait_for_timeout(150)
+        fill(pg, P('research.audiences.0.name'), 'Team parents (fictional)')
+        fill(pg, P('research.audiences.0.reach'), 120)
+        fill(pg, P('research.audiences.0.responded'), 0)
+        a0 = stored(pg)['research']['audiences'][0]
+        check('audience: typed values are saved', a0['name'] == 'Team parents (fictional)' and a0['reach'] == 120, a0)
+        check('unknown stays unknown: a blank "contacted" is saved as null, not 0', a0['contacted'] is None, a0)
+        check('zero stays zero: a typed 0 is saved as 0', a0['responded'] == 0, a0)
+        fill(pg, P('research.audiences.0.contacted'), 35); fill(pg, P('research.audiences.0.contacted'), '')
+        check('clearing a number turns it back into unknown (null), not 0', stored(pg)['research']['audiences'][0]['contacted'] is None, stored(pg)['research']['audiences'][0])
+        pg.click('[data-action="add-research"][data-kind="audiences"]'); pg.wait_for_timeout(150)
+        fill(pg, P('research.audiences.1.name'), 'Alumni households (fictional)')
+        pg.select_option(P('research.audiences.1.unit'), 'households'); pg.wait_for_timeout(120)
+        fill(pg, P('research.audiences.1.reach'), 200)
+        pg.click('[data-action="add-research"][data-kind="audiences"]'); pg.wait_for_timeout(150)
+        fill(pg, P('research.audiences.2.name'), 'Golf league (fictional)')
+        fill(pg, P('research.audiences.2.reach'), 40)
+        ids = [x['id'] for x in stored(pg)['research']['audiences']]
+        pg.check(f'[data-research-toggle="research.audiences.2.overlapsWith"][value="{ids[0]}"]'); pg.wait_for_timeout(150)
+        check('overlap is saved by ticking a box', stored(pg)['research']['audiences'][2]['overlapsWith'] == [ids[0]])
+        tot = pg.inner_text('.research .rsum')
+        check('totals are per unit: 160 people and 200 households, never 360', 'people: 160 estimated reach' in tot and 'households: 200 estimated reach' in tot and '360' not in pg.inner_text('#app'), tot)
+        check('overlapping people are not called unique', 'not unique people: some groups overlap' in tot, tot)
+        check('different units are never added together (said on screen)', 'Different units are never added together' in tot)
+        # comparables
+        pg.click('[data-action="add-research"][data-kind="comparables"]'); pg.wait_for_timeout(150)
+        fill(pg, P('research.comparables.0.name'), 'Rotary scramble (fictional)')
+        fill(pg, P('research.comparables.0.priceSingle'), 140)
+        pg.select_option(P('research.comparables.0.comparability'), 'close'); pg.wait_for_timeout(120)
+        cmp_ = pg.inner_text('.research .rsum >> nth=1')
+        check('fees unknown: event is left out of any range, with the reason', 'required fees unknown' in cmp_ and 'No price range shown' in cmp_, cmp_)
+        fill(pg, P('research.comparables.0.feesPerPerson'), 0)
+        pg.click('[data-action="add-research"][data-kind="comparables"]'); pg.wait_for_timeout(150)
+        fill(pg, P('research.comparables.1.name'), 'PTA golf day (fictional)')
+        fill(pg, P('research.comparables.1.priceSingle'), 120); fill(pg, P('research.comparables.1.feesPerPerson'), 5)
+        pg.select_option(P('research.comparables.1.comparability'), 'close'); pg.wait_for_timeout(120)
+        cmp_ = pg.inner_text('.research .rsum >> nth=1')
+        check('range: two close comparisons, per person including fees: $125–$140', '$125–$140' in cmp_ and 'from 2 close comparisons' in cmp_, cmp_)
+        check('range: sample size and limits shown, and never a recommended price', 'Small sample: 2 events' in cmp_ and 'not a recommended price' in cmp_, cmp_)
+        # assumption note
+        pg.click('[data-action="add-research"][data-kind="links"]'); pg.wait_for_timeout(150)
+        cids = [x['id'] for x in stored(pg)['research']['comparables']]
+        pg.check(f'[data-research-toggle="research.links.0.researchIds"][value="{cids[0]}"]'); pg.wait_for_timeout(150)
+        fill(pg, P('research.links.0.note'), 'Our price is inside the observed range (fictional).')
+        link_txt = pg.inner_text('[data-rec] >> nth=-1')
+        check('assumption note shows the current value and says it is not changed', 'In your plan now: $125 per player' in link_txt and 'does not change it' in link_txt, link_txt)
+        # research changes no money and no evidence
+        after = money_view(pg)
+        check('research added: every calculated figure on the results page is unchanged', all(before[k] == after[k] for k in ('cards', 'status', 'detail', 'whatif')), [k for k in before if before[k] != after[k]])
+        check('research added: the plan’s survey and payment evidence is unchanged', stored(pg)['evidence'] == evidence_before)
+        check('results show research on file, labeled as not used in any calculation', 'Research on file' in pg.inner_text('[data-research="golf"]') and 'not used in any calculation' in pg.inner_text('[data-research="golf"]'))
+        # refresh
+        pg.reload(); pg.wait_for_timeout(250); pg.goto(URL + '#research'); pg.wait_for_timeout(200)
+        s = stored(pg)['research']
+        check('refresh keeps all research', len(s['audiences']) == 3 and len(s['comparables']) == 2 and len(s['links']) == 1 and '$125–$140' in pg.inner_text('#app'))
+        # delete a cited record: the broken link is shown, then removed on request
+        pg.click('summary:has-text("Rotary scramble (fictional)")'); pg.wait_for_timeout(120)
+        btn = '[data-action="del-research"][data-kind="comparables"][data-j="0"]'
+        pg.click(btn); pg.wait_for_timeout(80)
+        check('remove asks to confirm first', len(stored(pg)['research']['comparables']) == 2)
+        pg.click(btn); pg.wait_for_timeout(200)
+        check('remove deletes the record', [x['name'] for x in stored(pg)['research']['comparables']] == ['PTA golf day (fictional)'])
+        prob = pg.inner_text('#app .research-problems') if pg.locator('#app .research-problems').count() else ''
+        check('a deleted record still cited by a note is shown as a broken link, not silently dropped', 'cites a research record that was removed' in prob and stored(pg)['research']['links'][0]['researchIds'] == [cids[0]], prob)
+        pg.goto(URL + '#results'); pg.wait_for_timeout(200)
+        check('results show the broken research link too', 'point at a removed record' in pg.inner_text('[data-research="golf"]'))
+        pg.goto(URL + '#research'); pg.wait_for_timeout(200)
+        pg.click('[data-action="fix-research"]'); pg.wait_for_timeout(200)
+        check('removing the broken link clears it and keeps the note', pg.locator('#app .research-problems').count() == 0 and stored(pg)['research']['links'][0]['researchIds'] == [] and len(stored(pg)['research']['links']) == 1)
+        if shots: pg.screenshot(path=f'{shots}/research-entry.png', full_page=True)
+        check('entry: no page errors', not errs, errs)
+        ctx.close()
+    section('entry', entry)
+
+    # 2. Untrusted text and links
+    def safety():
+        ctx, pg, errs = new(); pg.goto(URL); open_file(pg, CONTROL)
+        plan = json.loads(CONTROL)
+        plan['research'] = {'audiences': [{'id': 'a1', 'name': '<img src=x onerror="window.__pwned=1">Parents', 'unit': 'people', 'category': 'parents', 'reach': 10, 'notes': '<script>window.__pwned=2</script>', 'optionIds': ['golf']}],
+            'comparables': [{'id': 'c1', 'name': 'Bad link (fictional)', 'sourceUrl': 'javascript:window.__pwned=3', 'comparability': 'close', 'priceSingle': 100, 'feesPerPerson': 0, 'optionIds': ['golf']},
+                            {'id': 'c2', 'name': 'Data link (fictional)', 'sourceUrl': 'data:text/html,<script>alert(1)</script>', 'optionIds': ['golf']},
+                            {'id': 'c3', 'name': 'Good link (fictional)', 'sourceUrl': 'https://example.org/fictional?a=1&b="x"', 'optionIds': ['golf']}], 'links': []}
+        st = open_file(pg, json.dumps(plan)); check('safety: plan with hostile-looking text imports', 'Plan imported' in st, st)
+        pg.goto(URL + '#research'); pg.wait_for_timeout(200)
+        pg.click('summary:has-text("Bad link")'); pg.click('summary:has-text("Data link")'); pg.click('summary:has-text("Good link")'); pg.wait_for_timeout(150)
+        hrefs = pg.eval_on_selector_all('#app a[target=_blank]', 'els => els.map(e => e.getAttribute("href"))')
+        check('only http(s) links are clickable; javascript: and data: are shown as text', hrefs == ['https://example.org/fictional?a=1&b=%22x%22'], hrefs)
+        check('links open safely (noopener noreferrer)', pg.eval_on_selector_all('#app a[target=_blank]', 'els => els.every(e => /noopener/.test(e.rel) && /noreferrer/.test(e.rel))'))
+        check('unsafe links are labeled as not opened', 'not opened: only http and https links are clickable' in pg.inner_text('#app'))
+        pg.goto(URL + '#results'); pg.wait_for_timeout(200); m = memo(pg)
+        check('markup in research text is shown as text and never runs', pg.evaluate('window.__pwned') is None and '<img src=x' in pg.inner_text('[data-research="golf"]'), pg.evaluate('window.__pwned'))
+        check('board summary carries the text, not active markup', '<img src=x' in m)
+        check('safety: no page errors', not errs, errs)
+        ctx.close()
+    section('safety', safety)
+
+    # 3. Backup download, reopen, restore, unknown fields kept, older and malformed backups
+    def backups():
+        ctx, pg, errs = new(); pg.goto(URL)
+        plan = json.loads(EXAMPLE); plan['isDemo'] = False
+        plan['research']['audiences'][0]['futureField'] = {'kept': True}   # a field this version doesn't know
+        plan['research']['futureList'] = [1, 2, 3]
+        st = open_file(pg, json.dumps(plan)); check('backup: research plan imports', 'Plan imported' in st, st)
+        original = stored(pg)
+        check('unknown fields in research are kept, not erased', original['research']['audiences'][0].get('futureField') == {'kept': True} and original['research'].get('futureList') == [1, 2, 3])
+        pg.goto(URL + '#research'); pg.wait_for_timeout(200)
+        pg.click('summary:has-text("Current team parents")'); fill(pg, P('research.audiences.0.notes'), 'Edited note (fictional)')
+        edited = stored(pg)
+        check('editing a record keeps its unknown fields', edited['research']['audiences'][0].get('futureField') == {'kept': True} and edited['research']['audiences'][0]['notes'] == 'Edited note (fictional)')
+        pg.click('[data-action="toggle-save"]')
+        with pg.expect_download() as dl: pg.click('#save-panel [data-action="download-backup"]')
+        file_text = pathlib.Path(dl.value.path()).read_text(); pg.click('[data-action="toggle-save"]')
+        check('downloaded backup holds the research exactly', json.loads(file_text) == edited)
+        st = open_file(pg, PRACTICE); check('an older backup without research opens', 'Plan imported' in st, st)
+        pg.goto(URL + '#research'); pg.wait_for_timeout(200)
+        check('older backup: research page shows empty states', 'No audience groups yet' in pg.inner_text('#app'))
+        pg.goto(URL + '#results'); pg.wait_for_timeout(200)
+        check('older backup: results say no research is linked', 'No research linked to this option' in pg.inner_text('#app'))
+        st = open_file(pg, file_text)
+        check('reopening the downloaded backup restores the research exactly', 'Plan imported' in st and stored(pg) == edited, st)
+        # malformed research: refused whole, nothing changes
+        good = stored(pg)
+        bad_cases = {
+            'negative reach': lambda d: d['research']['audiences'][0].__setitem__('reach', -5),
+            'unknown unit': lambda d: d['research']['audiences'][0].__setitem__('unit', 'golfers-per-household'),
+            'impossible date': lambda d: d['research']['comparables'][0].__setitem__('checkedDate', '2026-02-30'),
+            'URL that is not text': lambda d: d['research']['comparables'][0].__setitem__('sourceUrl', {'href': 'x'}),
+            'research is a list': lambda d: d.__setitem__('research', []),
+            'duplicate record id': lambda d: d['research']['comparables'][0].__setitem__('id', d['research']['audiences'][0]['id']),
+            'unsafe option id': lambda d: d['research']['links'][0].__setitem__('optionId', '<b>x</b>'),
+            'price as text': lambda d: d['research']['comparables'][0].__setitem__('priceSingle', '150'),
+        }
+        for name, mutate in bad_cases.items():
+            d = json.loads(file_text); mutate(d)
+            st = open_file(pg, json.dumps(d))
+            check(f'malformed research ({name}) is refused and changes nothing', 'Could not import' in st and stored(pg) == good, st)
+        # restore after replacing with the example
+        pg.click('[data-action="toggle-save"]'); pg.click('[data-action="load-demo"]'); pg.click('[data-action="load-demo"]'); pg.wait_for_timeout(250)
+        pg.click('[data-action="toggle-save"]'); pg.click('[data-action="restore-backup"]'); pg.click('[data-action="restore-backup"]'); pg.wait_for_timeout(250)
+        check('restore previous plan brings the research back exactly', stored(pg) == good, pg.inner_text('#status'))
+        # a deleted option leaves visible broken links
+        pg.goto(URL + '#step-options'); pg.wait_for_timeout(150)
+        pg.click('[data-action="add-option"]'); pg.wait_for_timeout(150)
+        pg.click('[data-action="del-option"][data-i="0"]'); pg.click('[data-action="del-option"][data-i="0"]'); pg.wait_for_timeout(200)
+        pg.goto(URL + '#research'); pg.wait_for_timeout(200)
+        prob = pg.inner_text('#app .research-problems') if pg.locator('#app .research-problems').count() else ''
+        check('deleting an option shows research linked to it as broken, keeping the records', 'linked to an option that no longer exists' in prob and len(stored(pg)['research']['audiences']) == 4, prob[:300])
+        check('backups: no page errors', not errs, errs)
+        ctx.close()
+    section('backups', backups)
+
+    # 4. Saving fails while research is edited
+    def failing():
+        ctx = b.new_context(viewport={'width': 1280, 'height': 900}); ctx.add_init_script(FAULTS); pg = ctx.new_page(); errs = []
+        pg.on('pageerror', lambda e: errs.append(str(e)))
+        pg.goto(URL); open_file(pg, CONTROL); pg.goto(URL + '#research'); pg.wait_for_timeout(200)
+        before = stored(pg)
+        pg.evaluate("sessionStorage.setItem('__fault', JSON.stringify({all: true}))")
+        pg.click('[data-action="add-research"][data-kind="audiences"]'); pg.wait_for_timeout(150)
+        fill(pg, P('research.audiences.0.name'), 'Not saved group (fictional)')
+        check('save failure: red Not saved warning appears', pg.is_visible('#save-warning') and 'not saved' in pg.inner_text('#save-warning').lower())
+        check('save failure: the stored plan is untouched', stored(pg) == before)
+        pg.click('#save-warning [data-action="warn-export"]'); pg.wait_for_timeout(150)
+        check('save failure: "Show plan as text" holds the unsaved research', 'Not saved group (fictional)' in pg.input_value('#export-text'))
+        pg.evaluate("sessionStorage.removeItem('__fault')"); fill(pg, P('research.audiences.0.name'), 'Saved group (fictional)')
+        check('after storage recovers, the research saves and the warning clears', not pg.is_visible('#save-warning') and stored(pg)['research']['audiences'][0]['name'] == 'Saved group (fictional)')
+        check('save failure: no page errors', not errs, errs)
+        ctx.close()
+    section('save failure', failing)
+
+    # 5. Phone width and keyboard
+    def phone():
+        ctx, pg, errs = new(viewport={'width': 375, 'height': 800}); pg.goto(URL); open_file(pg, EXAMPLE)
+        pg.goto(URL + '#research'); pg.wait_for_timeout(250)
+        check('375px research page: no sideways scrolling (records closed)', no_hscroll(pg))
+        pg.focus('details[data-rec] > summary >> nth=0'); pg.keyboard.press('Enter'); pg.wait_for_timeout(150)
+        check('keyboard: Enter opens a record', pg.evaluate("document.querySelector('details[data-rec]').open"))
+        for s_ in pg.query_selector_all('details[data-rec]'): s_.evaluate('d => d.open = true')
+        pg.wait_for_timeout(150)
+        check('375px research page: no sideways scrolling (every record open)', no_hscroll(pg))
+        box = '[data-research-toggle="research.audiences.0.optionIds"]'
+        pg.focus(box); pg.keyboard.press('Space'); pg.wait_for_timeout(200)
+        check('keyboard: Space toggles a link box and focus stays on it', pg.evaluate('document.activeElement.dataset.researchToggle') == 'research.audiences.0.optionIds' and stored(pg)['research']['audiences'][0]['optionIds'] == [])
+        check('a record stays open after an edit re-draws the page', pg.evaluate("document.querySelector('details[data-rec]').open"))
+        pg.goto(URL + '#results'); pg.wait_for_timeout(200)
+        check('375px results with research: no sideways scrolling', no_hscroll(pg))
+        if shots: pg.goto(URL + '#research'); pg.wait_for_timeout(200); pg.screenshot(path=f'{shots}/research-375.png', full_page=True)
+        check('phone: no page errors', not errs, errs)
+        ctx.close()
+    section('phone', phone)
+
+    # 6. Board summary and print
+    def board():
+        ctx, pg, errs = new(); pg.goto(URL); open_file(pg, EXAMPLE); pg.goto(URL + '#results'); pg.wait_for_timeout(250)
+        m = memo(pg)
+        check('board summary: research on file per option, labeled fictional and not used in calculations', "Research on file (fictional; organizer's records; not used in any calculation)" in m, m[m.find('Research on'):][:300])
+        check('board summary: price range with sample size and "not a recommended price"', '$125–$155 (n = 2 close comparisons)' in m and 'Not a recommended price' in m)
+        check('board summary: audience section per unit, not unique people, never added across units', '## Audience research' in m and 'Sums are not unique people' in m and 'people: 180 estimated reach' in m and '480' not in m)
+        check('board summary: assumption notes show the current value and cited research', 'Price per person or item ($125 per player in the plan): cites FICTIONAL Rotary spring scramble' in m)
+        pg.emulate_media(media='print')
+        check('print: research section prints with each option', pg.is_visible('[data-research="golf"]') and 'Research on file' in pg.inner_text('[data-research="golf"]'))
+        check('print: the edit link does not print', not pg.is_visible('[data-research="golf"] .noprint'))
+        if shots: pg.pdf(path=f'{shots}/research-print.pdf')
+        pg.emulate_media(media='screen')
+        check('board: no page errors', not errs, errs)
+        ctx.close()
+    section('board summary and print', board)
+    b.close()
+
+for n, ok, det in results: print(('PASS ' if ok else 'FAIL ') + n + ('' if ok or not det else f'  [{det}]'))
+print(f'{sum(ok for _, ok, _ in results)}/{len(results)} checks passed')
+sys.exit(0 if results and all(ok for _, ok, _ in results) else 1)

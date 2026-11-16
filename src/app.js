@@ -352,7 +352,8 @@
         ${group ? num(`${p}.${gp}`, `Price for a full ${t.groupName} of ${size} ($)`, { placeholder: String((Number(o.price) || 0) * size), help: `Leave blank if a ${t.groupName} pays ${size} × the single price.` }) : ''}
         ${group ? pct(`${p}.${gs}`, `What % of ${t.many} will buy as a full ${t.groupName}? (your guess)`, 'Used only to work out ticket money. It does not change how many come.') : ''}
       </div>
-      <p class="hint">These exact prices go into the supporter survey, so a “Yes” always means yes at this price.</p>`;
+      <p class="hint">These exact prices go into the supporter survey, so a “Yes” always means yes at this price.</p>
+      <p class="hint research-hint">Optional: note prices of similar events on the <a href="#research">Research page</a>. It never changes your price.</p>`;
   }
 
   function stepCosts() {
@@ -573,6 +574,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <li>Enter totals only. Names stay in your own records, never in this planner.</li>
         <li>For money received, enter what actually came in, from your records. The planner never works it out from price × people, because group deals and price changes make that wrong.</li>
       </ul>
+      <p class="hint research-hint">Optional: record how many people each group could reach on the <a href="#research">Research page</a>. Those estimates are kept separate and never added to these counts.</p>
       <details class="qs"><summary>Import counts from a spreadsheet (CSV)</summary>
         <div class="row-actions"><label class="small filebtn">Choose CSV file<input type="file" class="file-input" accept=".csv,text/csv" data-action="import-csv"></label>
         <button class="small" data-action="csv-template">Show CSV template</button></div>
@@ -785,6 +787,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         </div>
         ${d.missing.length ? `<section class="verify"><h4>Must verify before signing</h4><ul class="plain miss">${d.missing.map((m) => `<li>${esc(m)}</li>`).join('')}</ul></section>` : '<p class="hint">Nothing is flagged, but check the “Before anyone signs” list below.</p>'}
         ${contractSection(o)}
+        ${researchSection(o)}
       </article>`;
     }).join('');
   }
@@ -961,10 +964,212 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       L.push(`- Contract dates and terms (${unknownCount(ct.items) ? `${unknownCount(ct.items)} still unknown` : 'all entered'}):`);
       ct.items.forEach(([st, text]) => L.push(`  - ${st === 'unknown' ? '[unknown] ' : st === 'late' ? '[date passed or today] ' : ''}${text}`));
       L.push(`  - ${CONTRACT_CAVEAT}`);
+      const rl = researchLines(o);
+      if (rl.length) { L.push(`- Research on file (${state.isDemo ? 'fictional; ' : ''}organizer's records; not used in any calculation):`); rl.forEach((l) => L.push(`  - ${l}`)); }
+    }
+    const au = E.audienceSummary(state);
+    if (au.groups) {
+      L.push('', '## Audience research', '_Estimates of who could be reached, per counting unit. Sums are not unique people, and units are never added together. None of this is a sign-up or a forecast._');
+      au.units.forEach((u) => L.push(`- ${UNIT_LABEL[u.unit]}: ${u.reachSum == null ? 'reach unknown' : `${u.reachSum.toLocaleString('en-US')} estimated reach`} across ${u.groups} group${u.groups === 1 ? '' : 's'}${u.reachUnknown ? ` (${u.reachUnknown} unknown)` : ''}${u.overlaps ? '; some groups overlap' : ''}.`));
+      au.warnings.forEach((w) => L.push(`- ${w}`));
     }
     L.push('', '## Before anyone signs'); SIGNING_QUESTIONS.forEach((q) => L.push(`- [ ] ${q}`));
     L.push('', '_Planning estimates only. No guarantee of results; no tax or legal determinations._');
     return L.join('\n');
+  }
+
+  // ---------- research records (Batch 1, DECISION_LOG row 84) ----------
+  // A record of what the organizer found out. Nothing here feeds a calculation, a status, the evidence counts or the
+  // scenarios: it is shown beside the plan, labeled, and in the board summary.
+  const RES_KEYS = ['audiences', 'comparables', 'links'];
+  const openRecords = new Set(); // which research records are expanded (screen only, never saved)
+  const recDetails = (id, summary, body) => `<details class="rcard" data-rec="${esc(id)}" ${openRecords.has(id) ? 'open' : ''}><summary>${summary}</summary><div class="rcard-body">${body}</div></details>`;
+  const research = () => {
+    const r = state.research && typeof state.research === 'object' && !Array.isArray(state.research) ? state.research : {};
+    return { audiences: Array.isArray(r.audiences) ? r.audiences : [], comparables: Array.isArray(r.comparables) ? r.comparables : [], links: Array.isArray(r.links) ? r.links : [] };
+  };
+  function ensureResearch() {
+    if (!state.research || typeof state.research !== 'object' || Array.isArray(state.research)) state.research = {};
+    RES_KEYS.forEach((k) => { if (!Array.isArray(state.research[k])) state.research[k] = []; });
+    return state.research;
+  }
+  const UNIT_LABEL = { people: 'people', households: 'households', businesses: 'businesses', organizations: 'organizations', other: 'other units' };
+  const CATEGORY_LABEL = { parents: 'Parents and guardians', alumni: 'Alumni', businesses: 'Local businesses', golfers: 'Golfers', community: 'Community group', staff: 'Coaches and staff', other: 'Other' };
+  const KIND_LABEL = { fictional: 'Fictional example', sourced: 'Sourced observation', estimate: 'Organizer estimate' };
+  const QUALITY_LABEL = { official: 'Organizer’s own published page or flyer', secondhand: 'Secondhand (news, social post, someone told us)', personal: 'Our own experience', unknown: 'Not recorded' };
+  const COMPARABILITY_LABEL = { unknown: 'Not judged yet', close: 'Close: same kind, units and inclusions', partial: 'Partly: some differences matter', not: 'Not comparable' };
+  const TIER_LABEL = { unknown: 'Not recorded', early: 'Early-bird', regular: 'Regular', single: 'Only one price offered' };
+  const ASSUMPTION_LABEL = { price: 'Price per person or item', groupPrice: 'Group price', capacity: 'Capacity', conservative: 'Low (conservative) number', middle: 'Likely (middle) number', optimistic: 'High (optimistic) number', sponsorship: 'Sponsorship', costs: 'Costs', other: 'Something else' };
+  const kindBadge = (rec) => { const k = E.researchKind(state, rec); return `<span class="kind kind-${k}">${esc(KIND_LABEL[k])}</span>`; };
+  const countText = (v, unit) => (v == null || v === '' ? 'unknown' : `${Number(v).toLocaleString('en-US')} ${unit || ''}`.trim());
+  // Only plain web links become clickable; anything else (javascript:, data:, file:) is shown as text, escaped.
+  const safeUrl = (u) => { try { const x = new URL(String(u || '').trim()); return x.protocol === 'https:' || x.protocol === 'http:' ? x.href : null; } catch (e) { return null; } };
+  const sourceHtml = (c) => {
+    const u = String(c.sourceUrl || '').trim(), ok = safeUrl(u);
+    const link = ok ? `<a href="${esc(ok)}" target="_blank" rel="noopener noreferrer">${esc(u)}</a>` : u ? `${esc(u)} <span class="flag">not opened: only http and https links are clickable</span>` : '';
+    return [link, c.sourceRef ? esc(c.sourceRef) : ''].filter(Boolean).join(' · ') || '<span class="muted">no source recorded</span>';
+  };
+  const optionChecks = (path, ids) => state.options.map((o) => `<label class="chk"><input type="checkbox" data-research-toggle="${path}" value="${esc(o.id)}" ${(ids || []).includes(o.id) ? 'checked' : ''}> ${esc(o.name)}</label>`).join('');
+  const missingChecks = (path, ids, known) => (ids || []).filter((id) => !known.has(id)).map((id) => `<label class="chk missing"><input type="checkbox" data-research-toggle="${path}" value="${esc(id)}" checked> <span class="flag">missing: ${esc(id)}</span></label>`).join('');
+  function currentAssumption(o, a) {
+    if (!o) return 'unknown (option missing)';
+    const t = T(o), sp = o.scenarioParticipants || {};
+    if (a === 'price') return money(Number(o.price) || 0) + ` per ${t.one}`;
+    if (a === 'groupPrice') return (Number(o.groupSize) || 1) > 1 ? (o.groupPrice == null || o.groupPrice === '' ? `${money((Number(o.price) || 0) * Number(o.groupSize))} (no discount)` : money(Number(o.groupPrice))) + ` per ${t.groupName || 'group'} of ${o.groupSize}` : 'no group pricing';
+    if (a === 'capacity') return `${E.maxFeasible(o)} ${t.many}`;
+    if (a === 'conservative' || a === 'middle' || a === 'optimistic') return `${sp[a] ?? 0} ${t.many}`;
+    if (a === 'sponsorship') { const p = E.project(o, 0, E.firmContext(state, o)); return `${money(p.sponsorshipByStatus.collected + p.sponsorshipByStatus.committed)} collected or committed; ${money(p.sponsorshipByStatus.hoped)} hoped-for`; }
+    if (a === 'costs') return `${money((o.perParticipantCosts || []).reduce((s, l) => s + (Number(l.amount) || 0), 0))} per ${t.one} + ${money((o.fixedCosts || []).reduce((s, l) => s + (Number(l.amount) || 0), 0))} one-time`;
+    return '—';
+  }
+
+  function audienceCard(a, j, all) {
+    const p = `research.audiences.${j}`, others = all.filter((x) => x.id !== a.id);
+    const sum = `<span class="rtitle">${esc(a.name || 'Unnamed group')}</span> <span class="rfacts">${esc(countText(a.reach, UNIT_LABEL[a.unit] || 'units'))} reach${(a.overlapsWith || []).length ? ' · overlaps' : ''}</span> ${kindBadge(a)}`;
+    return recDetails(a.id, sum, `<div class="rcard-head"><button class="small danger" data-action="del-research" data-kind="audiences" data-j="${j}">Remove this group</button></div>
+      <div class="fields">
+        ${txtIn(p + '.name', 'Group', { max: 120, placeholder: 'e.g. current team parents' })}
+        ${sel(p + '.category', 'Kind of group', Object.entries(CATEGORY_LABEL))}
+        ${sel(p + '.unit', 'Counted in', Object.entries(UNIT_LABEL))}
+        ${num(p + '.reach', 'Estimated people or units you could reach', { step: 1, placeholder: 'unknown', help: 'Your estimate of who could hear about it. Not a forecast of who will come.' })}
+        ${num(p + '.contacted', 'Actually contacted so far', { step: 1, placeholder: 'unknown' })}
+        ${num(p + '.responded', 'Survey responses from this group', { step: 1, placeholder: 'unknown', help: 'Kept here only. The plan’s own survey totals are on step 8.' })}
+        ${txtIn(p + '.source', 'Where the number comes from', { wide: true, max: 300, placeholder: 'e.g. roster count from the coach; leave blank if it is your own estimate' })}
+        ${dateIn(p + '.sourceDate', 'Date of that source')}
+      </div>
+      <fieldset class="checks-set"><legend>Overlaps with (the same people may be in both)</legend>${others.length ? others.map((x) => `<label class="chk"><input type="checkbox" data-research-toggle="${p}.overlapsWith" value="${esc(x.id)}" ${(a.overlapsWith || []).includes(x.id) ? 'checked' : ''}> ${esc(x.name || 'Unnamed group')}</label>`).join('') : '<span class="muted">No other groups yet.</span>'}${missingChecks(p + '.overlapsWith', a.overlapsWith, new Set(others.map((x) => x.id)))}</fieldset>
+      <fieldset class="checks-set"><legend>Relevant to</legend>${optionChecks(p + '.optionIds', a.optionIds)}${missingChecks(p + '.optionIds', a.optionIds, new Set(state.options.map((o) => o.id)))}</fieldset>
+      ${area(p + '.notes', 'Notes', 'Counts and context only. No names, contact details, student information or sensitive personal details.')}`);
+  }
+
+  function comparableCard(c, j) {
+    const p = `research.comparables.${j}`;
+    const price = c.priceSingle == null || c.priceSingle === '' ? 'price unknown' : `${money(Number(c.priceSingle))}${c.feesPerPerson == null || c.feesPerPerson === '' ? ' + fees unknown' : Number(c.feesPerPerson) ? ` + ${money(Number(c.feesPerPerson))} fees` : ''}`;
+    const sum = `<span class="rtitle">${esc(c.name || 'Unnamed event')}</span> <span class="rfacts">${esc(price)} · ${esc((COMPARABILITY_LABEL[c.comparability] || COMPARABILITY_LABEL.unknown).split(':')[0])}</span> ${kindBadge(c)}`;
+    return recDetails(c.id, sum, `<div class="rcard-head"><button class="small danger" data-action="del-research" data-kind="comparables" data-j="${j}">Remove this event</button></div>
+      <p class="hint">Source: ${sourceHtml(c)}</p>
+      <div class="fields">
+        ${txtIn(p + '.name', 'Event name', { max: 160 })}
+        ${txtIn(p + '.eventType', 'Kind and format', { max: 160, placeholder: 'e.g. golf scramble, shotgun start' })}
+        ${txtIn(p + '.location', 'Where', { max: 160 })}
+        ${dateIn(p + '.eventDate', 'Event date')}
+        ${txtIn(p + '.sourceUrl', 'Web address (if any)', { wide: true, max: 2000, placeholder: 'https://…' })}
+        ${txtIn(p + '.sourceRef', 'Or other source', { wide: true, max: 300, placeholder: 'e.g. printed flyer, phone call with the organizer' })}
+        ${dateIn(p + '.checkedDate', 'Date you checked')}
+        ${sel(p + '.sourceQuality', 'Source quality', Object.entries(QUALITY_LABEL))}
+        ${txtIn(p + '.format', 'Format details', { max: 200, placeholder: 'e.g. 18 holes, foursomes' })}
+        ${txtIn(p + '.included', 'What the price includes', { wide: true, max: 300, placeholder: 'e.g. golf, cart, lunch, gift' })}
+        ${sel(p + '.pricingTier', 'Price shown is', Object.entries(TIER_LABEL))}
+        ${num(p + '.priceSingle', 'Advertised price per person ($)', { placeholder: 'unknown' })}
+        ${num(p + '.priceGroup', 'Advertised group price ($)', { placeholder: 'unknown' })}
+        ${num(p + '.groupSize', 'Group size', { step: 1, placeholder: 'unknown' })}
+        ${num(p + '.feesPerPerson', 'Required fees per person, not in the price ($)', { placeholder: 'unknown', help: 'Processing or other required fees. Enter 0 if there are none; leave blank if you don’t know.' })}
+        ${txtIn(p + '.feesNote', 'About the fees', { max: 200 })}
+      </div>
+      <h4 class="sub">Results (only if known)</h4>
+      <p class="hint">An advertised price, a capacity or a “sold out” claim is not a result. Record a result only from something like the organizer’s report.</p>
+      <div class="fields">
+        ${num(p + '.resultAttendance', 'Reported attendance', { step: 1, placeholder: 'unknown' })}
+        ${txtIn(p + '.resultNote', 'Where that result comes from', { wide: true, max: 300 })}
+      </div>
+      <div class="checks">${chk(p + '.resultVerified', 'This result is verified (not just a flyer, a capacity or a “sold out” claim)')}</div>
+      <div class="fields">
+        ${sel(p + '.comparability', 'How comparable to your event?', Object.entries(COMPARABILITY_LABEL))}
+        ${area(p + '.differences', 'Differences that matter', 'e.g. includes dinner, private club, nine holes, early-bird price.')}
+      </div>
+      <fieldset class="checks-set"><legend>Compare with</legend>${optionChecks(p + '.optionIds', c.optionIds)}${missingChecks(p + '.optionIds', c.optionIds, new Set(state.options.map((o) => o.id)))}</fieldset>`);
+  }
+
+  function linkCard(l, j, recs) {
+    const p = `research.links.${j}`, o = state.options.find((x) => x.id === l.optionId);
+    const optSel = `<label class="f"><span>Option</span><select data-path="${p}.optionId">${o ? '' : `<option value="${esc(l.optionId)}" selected>(option no longer exists)</option>`}${state.options.map((x) => `<option value="${esc(x.id)}" ${x.id === l.optionId ? 'selected' : ''}>${esc(x.name)}</option>`).join('')}</select></label>`;
+    const known = new Set(recs.map((r) => r.id));
+    const sum = `<span class="rtitle">${esc(ASSUMPTION_LABEL[l.assumption] || 'Assumption')}${o ? `: ${esc(o.name)}` : ' (option missing)'}</span> <span class="rfacts">cites ${(l.researchIds || []).length}</span>`;
+    return recDetails(l.id, sum, `<div class="rcard-head"><button class="small danger" data-action="del-research" data-kind="links" data-j="${j}">Remove this note</button></div>
+      <div class="fields">${optSel}${sel(p + '.assumption', 'Assumption', Object.entries(ASSUMPTION_LABEL))}</div>
+      <p class="hint">In your plan now: <b>${esc(currentAssumption(o, l.assumption))}</b>. Citing research here does not change it.</p>
+      <fieldset class="checks-set"><legend>Research that supports it</legend>${recs.length ? recs.map((r) => `<label class="chk"><input type="checkbox" data-research-toggle="${p}.researchIds" value="${esc(r.id)}" ${(l.researchIds || []).includes(r.id) ? 'checked' : ''}> ${esc(r.name || 'Unnamed record')} <span class="muted">(${esc(KIND_LABEL[E.researchKind(state, r)])})</span></label>`).join('') : '<span class="muted">Add audience groups or similar events first.</span>'}${missingChecks(p + '.researchIds', l.researchIds, known)}</fieldset>
+      ${area(p + '.note', 'Why this research supports it', 'Say what it shows and what it doesn’t.')}`);
+  }
+
+  function audienceTotals() {
+    const s = E.audienceSummary(state);
+    if (!s.groups) return '';
+    return `<div class="rsum"><h3 class="sub">Totals by counting unit</h3><ul class="plain">${s.units.map((u) => `<li><b>${esc(UNIT_LABEL[u.unit])}:</b> ${u.reachSum == null ? 'reach unknown' : `${u.reachSum.toLocaleString('en-US')} estimated reach`} across ${u.groups} group${u.groups === 1 ? '' : 's'}${u.reachUnknown ? ` (${u.reachUnknown} unknown, not counted)` : ''}. <i>A sum of estimates, not unique ${esc(UNIT_LABEL[u.unit])}${u.overlaps ? ': some groups overlap, so the real number is lower' : ''}.</i>${u.contactedSum != null ? ` Contacted: ${u.contactedSum.toLocaleString('en-US')}.` : ''}${u.respondedSum != null ? ` Responses: ${u.respondedSum.toLocaleString('en-US')}.` : ''}</li>`).join('')}</ul>
+      ${s.unitCount > 1 ? '<p class="hint">Different units are never added together: households, businesses and people are not the same thing.</p>' : ''}
+      ${s.warnings.length ? `<ul class="plain warnlist">${s.warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}</div>`;
+  }
+
+  function comparablesForOption(o) {
+    const c = E.comparableSummary(state, o);
+    if (!c.linked) return `<li><b>${esc(o.name)}:</b> no similar events linked.</li>`;
+    return `<li><b>${esc(o.name)}:</b> ${c.linked} similar event${c.linked === 1 ? '' : 's'} linked. ${c.range ? `Observed advertised prices, per person including required fees: <b>${money(c.range.min)}–${money(c.range.max)}</b> from ${c.n} close comparisons.` : 'No price range shown.'} Your price: ${money(Number(o.price) || 0)}.
+      ${c.groups.length ? `Group prices per person: ${c.groups.map((g) => `${esc(g.name)} ${money(g.perPerson)}${g.feesKnown ? '' : ' (fees unknown)'}`).join('; ')}.` : ''}
+      ${c.excluded.length ? `<br><span class="muted">Left out: ${c.excluded.map((x) => `${esc(x.name)} (${esc(x.reason)})`).join('; ')}.</span>` : ''}
+      ${c.limitations.length ? `<br><span class="muted">Limits: ${c.limitations.map(esc).join(' ')}</span>` : ''}
+      <br><span class="muted">Advertised prices are not proof of demand, and this is not a recommended price.</span></li>`;
+  }
+
+  function problemsBox() {
+    const p = E.researchProblems(state);
+    if (!p.length) return '';
+    return `<div class="callout warn-callout research-problems" role="status"><span><b>Research links that point at nothing (${p.length}).</b> They are kept until you remove them.</span>
+      <ul class="plain">${p.map((x) => `<li>${esc(x.text)} <button class="small" data-action="fix-research" data-kind="${esc(x.kind)}" data-id="${esc(x.recordId)}" data-field="${esc(x.field)}" data-missing="${esc(x.missingId)}">${x.field === 'optionId' ? 'Remove this note' : 'Remove the broken link'}</button></li>`).join('')}</ul></div>`;
+  }
+
+  function viewResearch() {
+    const r = research(), recs = r.audiences.concat(r.comparables), ev = state.evidence || {};
+    const evRows = state.options.map((o) => { const n = (k) => Math.max(0, Math.floor(Number((ev[k] || {})[o.id]) || 0)); return `<li>${esc(o.name)}: paid ${n('paidRegistrations')} · named “yes” ${n('namedHighIntent')} · anonymous “yes” ${n('surveyDefinitelyAtPrice')} · “maybe” ${n('surveyProbablyAtPrice')}</li>`; }).join('');
+    return `<article class="research">
+      <p class="eyebrow">Optional</p>
+      <h1 tabindex="-1">Research</h1>
+      <p class="lede-s">Keep what you found out about your audience and similar events in one place, with where it came from. <b>Nothing on this page changes your numbers, your status or your survey totals.</b> It shows up beside your results and in the board summary, labeled.</p>
+      ${state.isDemo ? '<p class="callout warn-callout"><span>This is a made-up example: every record here is fictional.</span></p>' : ''}
+      ${problemsBox()}
+      <section class="panel"><h2>Audience worksheet</h2>
+        <p class="hint">One row per group you could ask: parents, alumni, local businesses, golfers, others. Keep each group in its own unit. Households and businesses are not players, and nothing here becomes a sign-up or a forecast. Blank means unknown.</p>
+        ${r.audiences.length ? r.audiences.map((a, j) => audienceCard(a, j, r.audiences)).join('') : '<p class="empty">No audience groups yet. Add one for each group you could reach.</p>'}
+        <div class="row-actions"><button class="small" data-action="add-research" data-kind="audiences">+ Add audience group</button></div>
+        ${audienceTotals()}
+        <details class="qs"><summary>Your plan’s own evidence (step 8), kept separate</summary><p class="hint">These are the counts the decision uses. Research totals above are never added to them.</p><ul class="plain">${evRows}</ul><p class="hint">Survey responses: ${Math.max(0, Math.floor(Number(ev.surveyResponses) || 0))}.</p></details>
+      </section>
+      <section class="panel"><h2>Similar events</h2>
+        <p class="hint">Prices and details from comparable fundraisers, entered by hand with a source. A price range appears only from events you mark as a close comparison, with a known price and known fees, compared per person including those fees. It needs at least two. It is never a recommended price.</p>
+        ${r.comparables.length ? r.comparables.map((c, j) => comparableCard(c, j)).join('') : '<p class="empty">No similar events yet.</p>'}
+        <div class="row-actions"><button class="small" data-action="add-research" data-kind="comparables">+ Add similar event</button></div>
+        ${r.comparables.length ? `<div class="rsum"><h3 class="sub">What the similar events show</h3><ul class="plain">${state.options.map(comparablesForOption).join('')}</ul></div>` : ''}
+      </section>
+      <section class="panel"><h2>What supports your assumptions</h2>
+        <p class="hint">Point an assumption (price, capacity, your low, likely or high number) at the research behind it. This records your reasoning; it never changes the assumption.</p>
+        ${r.links.length ? r.links.map((l, j) => linkCard(l, j, recs)).join('') : '<p class="empty">No notes yet.</p>'}
+        <div class="row-actions"><button class="small" data-action="add-research" data-kind="links">+ Add a note on an assumption</button></div>
+      </section>
+      <div class="row-actions"><a class="btn" href="#results">See results</a><a class="btn ghost" href="#step-event">Edit answers</a></div>
+    </article>`;
+  }
+
+  // Per option on the results page, in print and (as text) in the board summary.
+  function researchLines(o) {
+    const r = research(), lines = [];
+    const aud = r.audiences.filter((a) => (a.optionIds || []).includes(o.id));
+    aud.forEach((a) => lines.push(`${a.name || 'Unnamed group'}: ${countText(a.reach, UNIT_LABEL[a.unit] || 'units')} estimated reach${a.contacted != null && a.contacted !== '' ? `, ${countText(a.contacted)} contacted` : ''}${a.responded != null && a.responded !== '' ? `, ${countText(a.responded)} responses` : ''} (${KIND_LABEL[E.researchKind(state, a)].toLowerCase()}${a.source ? `: ${a.source}` : ''})${(a.overlapsWith || []).length ? '; overlaps another group' : ''}.`));
+    if (aud.length) lines.push('Audience figures are estimates of who could be reached, not sign-ups, and overlapping groups are not unique people.');
+    const c = E.comparableSummary(state, o);
+    if (c.linked) lines.push(`Similar events: ${c.linked} linked. ${c.range ? `Observed advertised prices per person including required fees: ${money(c.range.min)}–${money(c.range.max)} (n = ${c.n} close comparisons).` : 'No price range (too few close comparisons with known price and fees).'} ${c.limitations.join(' ')} Not a recommended price.`);
+    r.links.filter((l) => l.optionId === o.id).forEach((l) => {
+      const cited = (l.researchIds || []).map((id) => recsById(id)).map((x) => (x ? x.name || 'Unnamed record' : 'a removed record'));
+      lines.push(`${ASSUMPTION_LABEL[l.assumption] || 'Assumption'} (${currentAssumption(o, l.assumption)} in the plan): ${cited.length ? `cites ${cited.join(', ')}` : 'no research cited yet'}${l.note ? `. "${l.note}"` : ''}`);
+    });
+    const broken = E.researchProblems(state).filter((p) => p.missingId === o.id || (p.kind === 'link' && (r.links.find((l) => l.id === p.recordId) || {}).optionId === o.id));
+    if (broken.length) lines.push(`${broken.length} research link${broken.length === 1 ? '' : 's'} for this option point at a removed record.`);
+    return lines;
+  }
+  const recsById = (id) => { const r = research(); return r.audiences.concat(r.comparables).find((x) => x.id === id); };
+  function researchSection(o) {
+    const lines = researchLines(o);
+    return `<section class="research-sum" data-research="${esc(o.id)}"><h4>Research on file <span class="muted">(${state.isDemo ? 'fictional; ' : ''}not used in any calculation)</span></h4>
+      ${lines.length ? `<ul class="plain">${lines.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : '<p class="hint">No research linked to this option.</p>'}
+      <p class="hint noprint"><a href="#research">${lines.length ? 'Edit research' : 'Add research (optional)'}</a></p></section>`;
   }
 
   // ---------- views ----------
@@ -987,6 +1192,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     const h = (location.hash || '').slice(1);
     if (h === 'results') { view = 'results'; return; }
     if (h === 'guide') { view = 'guide'; return; }
+    if (h === 'research') { view = 'research'; return; }
     const k = STEPS.findIndex((st) => 'step-' + st.id === h);
     if (k >= 0) { const back = view === 'wizard' && k === stepIdx - 1; view = 'wizard'; openOption = back ? state.options.length - 1 : 0; stepIdx = k; return; }
     view = 'home';
@@ -1078,6 +1284,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <dl class="statuses">${Object.keys(STATUS_MEANING).map((k) => `<dt><span class="badge ${statusClass(k)}"><i aria-hidden="true">${statusIcon(k)}</i>${esc(E.STATUS_LABELS[k])}</span></dt><dd>${esc(STATUS_MEANING[k])}</dd>`).join('')}</dl>
         <p><b>Firm money</b> means ticket or sales money plus sponsorship that is collected or promised in writing. Break-even uses only firm money. Add-ons, “other income” and auction or raffle estimates appear in the low, likely and high cases, labeled as your assumptions.</p>
         <p><b>What would need to change?</b> Pick an option and a number to see how much more firm sponsorship would cover costs or reach your goal, and how many people would, but only when more people actually help. You can compare prices you type in at the same number. It can’t know whether people would still come at a different price. Nothing changes your plan unless you choose <b>Use … in my plan</b> and confirm.</p>
+        <p><b>Research</b> (optional, from the menu): keep audience sizes and similar events’ prices with their sources, and note which research supports an assumption. It never changes a number, a status or your survey totals. Unknown stays unknown, groups in different units are never added together, and a price range appears only from at least two close comparisons; it is never a recommended price.</p>
         <p><b>Contract dates and terms</b> (entered on the quote step) show as unknown until you fill them in. They never change the numbers, and the planner can’t remind you when it’s closed.</p>
         <p>To share with the board, use <b>Copy board summary</b> (paste into an email) or <b>Print</b>.</p>
       </section>
@@ -1122,6 +1329,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
           <button class="btn ghost" data-action="print">Print</button>
           <button class="btn ghost dl-only" data-action="download-backup">Download backup file</button>
           <a class="btn ghost" href="#step-event">Edit answers</a>
+          <a class="btn ghost" href="#research">Research</a>
         </div>
         <p id="live-status" class="sr-only" aria-live="polite">${esc(live)}</p>
       </header>
@@ -1149,7 +1357,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     }
     if (bkEl) bkEl.innerHTML = bk ? `Backup in this browser: <b>${esc(bk.plan.eventName || 'Untitled plan')}</b>${bk.at ? ` (kept ${esc(new Date(bk.at).toLocaleString())})` : ''}. <button class="small" data-action="restore-backup">Restore previous plan</button>` : 'No backup in this browser yet. One is kept automatically whenever an example, a new plan or an imported file replaces your plan.';
     const app = document.getElementById('app');
-    app.innerHTML = view === 'wizard' ? viewWizard() : view === 'results' ? viewResults() : view === 'guide' ? viewGuide() : viewHome();
+    app.innerHTML = view === 'wizard' ? viewWizard() : view === 'results' ? viewResults() : view === 'guide' ? viewGuide() : view === 'research' ? viewResearch() : viewHome();
     persist();
     const sl = app.querySelector('.steplist'), on = sl && sl.querySelector('li.on');
     if (sl && on && sl.scrollWidth > sl.clientWidth) sl.scrollLeft = on.offsetLeft - 16; // phones: show the current step pill
@@ -1167,6 +1375,13 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       const set = new Set(state.scenarioSettings[k].statuses);
       t.checked ? set.add(t.value) : set.delete(t.value);
       state.scenarioSettings[k].statuses = E.SPONSOR_STATUSES.filter((s) => set.has(s));
+      return renderKeepingFocus();
+    }
+    if (t.dataset.researchToggle) { // research id lists (overlaps, options, cited records): add or remove one id
+      const list = getPath(state, t.dataset.researchToggle);
+      const next = (Array.isArray(list) ? list : []).filter((x) => x !== t.value);
+      if (t.checked) next.push(t.value);
+      setPath(state, t.dataset.researchToggle, next); touched = true;
       return renderKeepingFocus();
     }
     if (t.dataset.whatif) { // hypothetical boxes: screen-only, never written into the plan
@@ -1220,6 +1435,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     if (!el || el === document.body || !document.getElementById('app').contains(el)) return null;
     if (el.dataset.path) return `[data-path="${CSS.escape(el.dataset.path)}"]`;
     if (el.dataset.whatif) return `[data-whatif="${CSS.escape(el.dataset.whatif)}"]`;
+    if (el.dataset.researchToggle) return `[data-research-toggle="${CSS.escape(el.dataset.researchToggle)}"][value="${CSS.escape(el.value)}"]`;
     if (el.dataset.scenarioStatus) return `[data-scenario-status="${CSS.escape(el.dataset.scenarioStatus)}"][value="${CSS.escape(el.value)}"]`;
     if (el.dataset.action) return `[data-action="${CSS.escape(el.dataset.action)}"]` + (el.dataset.i != null ? `[data-i="${CSS.escape(el.dataset.i)}"]` : '') + (el.dataset.k != null ? `[data-k="${CSS.escape(el.dataset.k)}"]` : '') + (el.dataset.j != null ? `[data-j="${CSS.escape(el.dataset.j)}"]` : '') + (el.dataset.key ? `[data-key="${CSS.escape(el.dataset.key)}"]` : '');
     if (el.id) return '#' + CSS.escape(el.id);
@@ -1252,6 +1468,30 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       const o = state.options[i], d = E.decide(state, o);
       o.scenarioParticipants.conservative = d.paid;
       o.scenarioParticipants.middle = d.paid + d.namedCounted; // stale or unrecorded answers don't count
+    }
+    else if (a === 'add-research') {
+      const r = ensureResearch(), k = b.dataset.kind;
+      if (k === 'audiences') r.audiences.push({ id: uid('aud_'), name: '', category: 'other', unit: 'people', reach: null, contacted: null, responded: null, source: '', sourceDate: null, overlapsWith: [], optionIds: [], notes: '' });
+      else if (k === 'comparables') r.comparables.push({ id: uid('cmp_'), name: '', eventType: '', location: '', eventDate: null, sourceUrl: '', sourceRef: '', checkedDate: null, sourceQuality: 'unknown', format: '', included: '', pricingTier: 'unknown', priceSingle: null, priceGroup: null, groupSize: null, feesPerPerson: null, feesNote: '', resultAttendance: null, resultVerified: false, resultNote: '', comparability: 'unknown', differences: '', optionIds: state.options.length === 1 ? [state.options[0].id] : [] });
+      else if (k === 'links') r.links.push({ id: uid('lnk_'), optionId: (state.options[0] || {}).id || '', assumption: 'price', researchIds: [], note: '' });
+      else return;
+      openRecords.add(r[k][r[k].length - 1].id); // a new record opens for editing
+    }
+    else if (a === 'del-research') {
+      const r = ensureResearch(), k = b.dataset.kind;
+      if (!RES_KEYS.includes(k) || !r[k][j]) return;
+      if (!armed(b, 'Remove this record? Click again')) return;
+      r[k].splice(j, 1);
+      say('Removed. Anything that pointed at it is listed under “Research links that point at nothing” until you remove it.');
+    }
+    else if (a === 'fix-research') {
+      const r = ensureResearch(), key = { audience: 'audiences', comparable: 'comparables', link: 'links' }[b.dataset.kind];
+      if (!key) return;
+      const idx = r[key].findIndex((x) => x && x.id === b.dataset.id); if (idx < 0) return;
+      const rec = r[key][idx], f = b.dataset.field;
+      if (f === 'optionId') r.links.splice(idx, 1);
+      else if (Array.isArray(rec[f])) rec[f] = rec[f].filter((x) => x !== b.dataset.missing);
+      else return;
     }
     else if (a === 'add-sponsor') state.sponsorships.push({ id: uid('sp_'), label: 'New sponsor', amount: 0, status: 'hoped', type: 'cash', optionId: '' });
     else if (a === 'del-sponsor') state.sponsorships.splice(j, 1);
@@ -1381,6 +1621,30 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     if (!isObj(s.settings) || !isNum(s.settings.fundraisingTarget) || !isNum(s.settings.volunteerHourValue)) p.push('Plan settings are missing or not numbers.');
     if (!isNum(s.volunteerHoursAvailable)) p.push('Volunteer hours available must be a number.');
     if (s.snapshot != null && (!isObj(s.snapshot) || Object.values(s.snapshot).some((v) => !isStr(v)))) p.push('Survey details must be text.');
+    // Research (optional; row 84). Imported research is untrusted: every known field is type-checked. Unknown extra fields
+    // are kept but never shown. Links may point at a missing option or record: that is shown, not refused.
+    if (s.research != null) {
+      const r = s.research;
+      const isIdList = (v) => v == null || (Array.isArray(v) && v.every((x) => typeof x === 'string' && SAFE_ID.test(x)));
+      const shortStr = (v, max) => v == null || (typeof v === 'string' && v.length <= max);
+      const isDate = (v) => v == null || v === '' || E.isCalendarDate(v);
+      const oneOf = (v, list) => v == null || list.includes(v);
+      const rids = new Set();
+      const recOk = (x, numFields, strFields, dateFields, enums, idLists) => isObj(x) && typeof x.id === 'string' && SAFE_ID.test(x.id) && !rids.has(x.id) && rids.add(x.id)
+        && numFields.every((k) => isNum(x[k])) && strFields.every(([k, m]) => shortStr(x[k], m)) && dateFields.every((k) => isDate(x[k]))
+        && Object.entries(enums).every(([k, list]) => oneOf(x[k], list)) && idLists.every((k) => isIdList(x[k]))
+        && (x.resultVerified == null || typeof x.resultVerified === 'boolean') && (x.fictional == null || typeof x.fictional === 'boolean');
+      if (!isObj(r)) p.push('Research must be a set of records.');
+      else {
+        ['audiences', 'comparables', 'links'].forEach((k) => { if (r[k] != null && !Array.isArray(r[k])) p.push(`Research "${k}" must be a list.`); });
+        if ((r.audiences || []).some((x) => !recOk(x, ['reach', 'contacted', 'responded'], [['name', 120], ['source', 300], ['notes', 1000]], ['sourceDate'],
+          { category: Object.keys(CATEGORY_LABEL), unit: Object.keys(UNIT_LABEL) }, ['overlapsWith', 'optionIds']))) p.push('An audience research record has a bad id, number, date, kind or text.');
+        if ((r.comparables || []).some((x) => !recOk(x, ['priceSingle', 'priceGroup', 'groupSize', 'feesPerPerson', 'resultAttendance'],
+          [['name', 160], ['eventType', 160], ['location', 160], ['sourceUrl', 2000], ['sourceRef', 300], ['format', 200], ['included', 300], ['feesNote', 200], ['resultNote', 300], ['differences', 1000]],
+          ['eventDate', 'checkedDate'], { sourceQuality: Object.keys(QUALITY_LABEL), pricingTier: Object.keys(TIER_LABEL), comparability: Object.keys(COMPARABILITY_LABEL) }, ['optionIds']))) p.push('A similar-event research record has a bad id, price, date, kind or text.');
+        if ((r.links || []).some((x) => !recOk(x, [], [['note', 1000]], [], { assumption: Object.keys(ASSUMPTION_LABEL) }, ['researchIds']) || !(typeof x.optionId === 'string' && SAFE_ID.test(x.optionId)))) p.push('A research note on an assumption has a bad id, option or kind.');
+      }
+    }
     return p;
   }
   function importJson(f) {
@@ -1395,7 +1659,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
           state = candidate;
           // Dry run: every calculation and page the plan feeds must work before anything is replaced.
           candidate.options.forEach((o) => { analyse(o); });
-          viewResults(); viewWizard(); boardMemo();
+          viewResults(); viewWizard(); viewResearch(); boardMemo();
         } catch (err) { state = prevState; throw new Error('the plan has values the planner cannot use (' + err.message + ').'); }
         state = prevState; // the backup is of the plan on screen, so put it back while the backup is made
         const bk = secureBackup(); // same rule as the other replacements: no backup of a real plan, no replacement
@@ -1465,6 +1729,8 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     const btn = document.querySelector('[data-action="copy-survey"]'); if (btn) btn.disabled = !snapshotReady();
   });
   document.addEventListener('click', onClick);
+  // Remember which research records are open, so re-drawing the page after an edit keeps them open.
+  document.addEventListener('toggle', (e) => { const d = e.target; if (d && d.matches && d.matches('details[data-rec]')) { if (d.open) openRecords.add(d.dataset.rec); else openRecords.delete(d.dataset.rec); } }, true);
   // Printing: open every collapsed detail section so the printout is complete, then put them back.
   let printOpened = [];
   // Add to the list rather than replace it: if a second beforeprint arrives first, the first one's sections still close.

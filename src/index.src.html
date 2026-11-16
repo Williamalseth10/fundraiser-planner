@@ -247,6 +247,25 @@ table.wi-t thead th { min-width: 120px; }
 @media (max-width: 760px) { .scroll-hint { display: block; } }
 .table-wrap[tabindex]:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 textarea { min-height: 80px; resize: vertical; }
+/* research records */
+.research { max-width: 900px; }
+.research h1 { margin-bottom: 8px; }
+.rcard { border: 1px solid var(--border); border-radius: 10px; padding: 4px 14px; margin: 10px 0; background: var(--surface-2); }
+.rcard > summary { cursor: pointer; min-height: 44px; display: list-item; padding: 10px 0; overflow-wrap: anywhere; }
+.rcard .rtitle { font-weight: 700; } .rcard .rfacts { color: var(--text-2); font-size: 15px; }
+.rcard-body { padding-bottom: 12px; }
+.rcard-head { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+.kind { font-size: 13px; font-weight: 700; border-radius: 999px; padding: 2px 10px; background: var(--surface); border: 1px solid var(--border); }
+.kind-sourced { color: var(--ok); border-color: var(--ok); } .kind-estimate { color: var(--warn); border-color: var(--warn); } .kind-fictional { color: var(--unk); background: var(--unk-bg); }
+fieldset.checks-set { border: 1px solid var(--border); border-radius: 8px; margin: 12px 0 0; padding: 8px 12px; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+fieldset.checks-set legend { font-size: 15px; font-weight: 700; padding: 0 4px; }
+.chk.missing { color: var(--warn); }
+.empty { color: var(--text-2); font-style: italic; }
+.rsum { border-top: 1px solid var(--border); margin-top: 14px; }
+ul.warnlist li { color: var(--warn); }
+.research-sum { border-top: 1px solid var(--border); margin-top: 10px; }
+.research-sum h4 { font-size: 16px; margin: 14px 0 4px; }
+.research a, .research-sum a { overflow-wrap: anywhere; }
 input[type=date] { font: inherit; font-size: 16px; color: var(--text); background: var(--surface); border: 1.5px solid var(--border); border-radius: 8px; padding: 9px 11px; width: 100%; min-height: 46px; }
 .guide { max-width: 820px; }
 .guide h1 { margin-bottom: 8px; }
@@ -285,6 +304,7 @@ footer.site-foot { border-top: 1px solid var(--border); color: var(--muted); fon
       <a href="#home" data-nav="home">Home</a>
       <a href="#step-event" data-nav="wizard">Plan</a>
       <a href="#results" data-nav="results">Results</a>
+      <a href="#research" data-nav="research">Research</a>
       <a href="#guide" data-nav="guide">How to use</a>
       <button data-action="toggle-save" aria-controls="save-panel">Save &amp; backup</button>
     </nav>

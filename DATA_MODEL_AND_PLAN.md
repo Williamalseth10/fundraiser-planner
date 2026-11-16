@@ -49,9 +49,22 @@ EventOption {
                quoteSource, cancellationNotes, weatherNotes: short text }   (optional, row 78; never used in the math)
 }
 Sponsorship { id, label, amount, status: collected|committed|hoped, type: cash|inKind, replacesCostId?, optionId? }
+research? {                                   (optional, row 84; never read by any calculation)
+  audiences:   [{ id, name, category: parents|alumni|businesses|golfers|community|staff|other,
+                  unit: people|households|businesses|organizations|other, reach|null, contacted|null, responded|null,
+                  source, sourceDate, overlapsWith:[audienceId], optionIds:[optionId], notes }],
+  comparables: [{ id, name, eventType, location, eventDate, sourceUrl, sourceRef, checkedDate,
+                  sourceQuality: official|secondhand|personal|unknown, format, included, pricingTier: early|regular|single|unknown,
+                  priceSingle|null, priceGroup|null, groupSize|null, feesPerPerson|null, feesNote,
+                  resultAttendance|null, resultVerified, resultNote, comparability: close|partial|not|unknown, differences, optionIds:[optionId] }],
+  links:       [{ id, optionId, assumption: price|groupPrice|capacity|conservative|middle|optimistic|sponsorship|costs|other,
+                  researchIds:[audienceId|comparableId], note }]
+}
 ```
 
 **Schema note (row 78):** `contract` is optional and additive, so `schemaVersion` stays 1 and older plans and files load unchanged. Dates are calendar text (`YYYY-MM-DD`), compared as calendar days against the local date. A file with an impossible date or non-text notes is refused whole and changes nothing. The "What would need to change?" boxes and the save-time line are screen-only: they are never written to the plan or to storage.
+
+**Research schema note (row 84):** `research` is optional and additive, so `schemaVersion` stays 1, older plans and files load unchanged, and nothing is migrated. Every known research field is type-checked on import; a bad record refuses the whole file. Unknown extra fields are kept. References to a missing option or record are allowed and shown as broken, never dropped. Research summaries (`audienceSummary`, `comparableSummary`, `researchProblems`, `researchKind`) never read or change the money model.
 
 ## Core rules (all covered by tests)
 - **Feasible headcounts:** 0 up to capacity, in whole groups when required. Never rounded up. Counts below the number already paid aren't scanned.
