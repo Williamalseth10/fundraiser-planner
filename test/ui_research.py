@@ -29,8 +29,19 @@ def memo(pg):
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: (t) => { window.__copied = t; return Promise.resolve(); } } });
       document.execCommand = () => { const el = document.activeElement; window.__copied = el && el.value; return true; }; }""")
     pg.click('[data-action="copy-memo"]'); pg.wait_for_timeout(120); return pg.evaluate('window.__copied') or ''
+def show(pg, hash, act=None):
+    # Navigate (or run act, e.g. a menu click) and return only after the app has redrawn for the new hash. The app redraws
+    # in its 'hashchange' handler, which runs after location.hash changes, so waiting for the hash alone (or a fixed sleep)
+    # can read the previous page on a slow machine (post-merge CI run 43894479322). A one-time listener registered after
+    # the app's runs after its redraw. A same-hash goto causes no redraw; a fresh load draws before goto() returns.
+    if pg.url.startswith(URL) and pg.evaluate('location.hash') != '#' + hash:
+        pg.evaluate("window.__shown = false; addEventListener('hashchange', () => setTimeout(() => { window.__shown = true; }), { once: true })")
+        act() if act else pg.goto(URL + '#' + hash)
+        pg.wait_for_function('window.__shown === true', timeout=10000)  # fails, never hangs, if the page doesn't change
+    else:
+        act() if act else pg.goto(URL + '#' + hash)
 def money_view(pg):  # everything on the results page that comes from the calculations
-    pg.goto(URL + '#results'); pg.wait_for_timeout(250)
+    show(pg, 'results')
     return {k: pg.inner_text(sel) for k, sel in [('cards', 'article.sum .cards'), ('status', 'article.sum .status-line'), ('detail', 'details.detail table'),
             ('verify', 'article.sum'), ('whatif', '.whatif .wi-cards')]}
 def no_hscroll(pg):
@@ -52,7 +63,7 @@ with sync_playwright() as p:
     def entry():
         ctx, pg, errs = new(); pg.goto(URL); open_file(pg, CONTROL)
         before = money_view(pg); evidence_before = stored(pg)['evidence']
-        pg.click('header.site a[data-nav="research"]'); pg.wait_for_function("location.hash === '#research'")
+        show(pg, 'research', lambda: pg.click('header.site a[data-nav="research"]'))
         t = pg.inner_text('#app')
         check('research page: reached from the menu, says it changes no numbers', 'Nothing on this page changes your numbers' in t)
         check('research page: clear empty states', 'No audience groups yet' in t and 'No similar events yet' in t and 'No notes yet' in t)
@@ -116,7 +127,7 @@ with sync_playwright() as p:
         check('research added: the plan’s survey and payment evidence is unchanged', stored(pg)['evidence'] == evidence_before)
         check('results show research on file, labeled as not used in any calculation', 'Research on file' in pg.inner_text('[data-research="golf"]') and 'not used in any calculation' in pg.inner_text('[data-research="golf"]'))
         # refresh
-        pg.reload(); pg.wait_for_timeout(250); pg.goto(URL + '#research'); pg.wait_for_timeout(200)
+        pg.reload(); pg.wait_for_timeout(250); show(pg, 'research')
         s = stored(pg)['research']
         check('refresh keeps all research', len(s['audiences']) == 3 and len(s['comparables']) == 2 and len(s['links']) == 1 and '$140 per person (advertised)' in pg.inner_text('#app'))
         # delete a cited record: the broken link is shown, then removed on request
@@ -128,9 +139,9 @@ with sync_playwright() as p:
         check('remove deletes the record', [x['name'] for x in stored(pg)['research']['comparables']] == ['PTA golf day (fictional)'])
         prob = pg.inner_text('#app .research-problems') if pg.locator('#app .research-problems').count() else ''
         check('a deleted record still cited by a note is shown as a broken link, not silently dropped', 'cites a research record that was removed' in prob and stored(pg)['research']['links'][0]['researchIds'] == [cids[0]], prob)
-        pg.goto(URL + '#results'); pg.wait_for_timeout(200)
+        show(pg, 'results')
         check('results show the broken research link too', 'point at a removed record' in pg.inner_text('[data-research="golf"]'))
-        pg.goto(URL + '#research'); pg.wait_for_timeout(200)
+        show(pg, 'research')
         pg.click('[data-action="fix-research"]'); pg.wait_for_timeout(200)
         check('removing the broken link clears it and keeps the note', pg.locator('#app .research-problems').count() == 0 and stored(pg)['research']['links'][0]['researchIds'] == [] and len(stored(pg)['research']['links']) == 1)
         if shots: pg.screenshot(path=f'{shots}/research-entry.png', full_page=True)
@@ -147,13 +158,13 @@ with sync_playwright() as p:
                             {'id': 'c2', 'name': 'Data link (fictional)', 'sourceUrl': 'data:text/html,<script>alert(1)</script>', 'optionIds': ['golf']},
                             {'id': 'c3', 'name': 'Good link (fictional)', 'sourceUrl': 'https://example.org/fictional?a=1&b="x"', 'optionIds': ['golf']}], 'links': []}
         st = open_file(pg, json.dumps(plan)); check('safety: plan with hostile-looking text imports', 'Plan imported' in st, st)
-        pg.goto(URL + '#research'); pg.wait_for_timeout(200)
+        show(pg, 'research')
         pg.click('summary:has-text("Bad link")'); pg.click('summary:has-text("Data link")'); pg.click('summary:has-text("Good link")'); pg.wait_for_timeout(150)
         hrefs = pg.eval_on_selector_all('#app a[target=_blank]', 'els => els.map(e => e.getAttribute("href"))')
         check('only http(s) links are clickable; javascript: and data: are shown as text', len(hrefs) >= 1 and set(hrefs) == {'https://example.org/fictional?a=1&b=%22x%22'}, hrefs)
         check('links open safely (noopener noreferrer)', pg.eval_on_selector_all('#app a[target=_blank]', 'els => els.every(e => /noopener/.test(e.rel) && /noreferrer/.test(e.rel))'))
         check('unsafe links are labeled as not opened', 'not opened: only http and https links are clickable' in pg.inner_text('#app'))
-        pg.goto(URL + '#results'); pg.wait_for_timeout(200); m = memo(pg)
+        show(pg, 'results'); m = memo(pg)
         check('markup in research text is shown as text and never runs', pg.evaluate('window.__pwned') is None and '<img src=x' in pg.inner_text('[data-research="golf"]'), pg.evaluate('window.__pwned'))
         check('board summary carries the text, not active markup', '<img src=x' in m)
         check('safety: no page errors', not errs, errs)
@@ -169,7 +180,7 @@ with sync_playwright() as p:
         st = open_file(pg, json.dumps(plan)); check('backup: research plan imports', 'Plan imported' in st, st)
         original = stored(pg)
         check('unknown fields in research are kept, not erased', original['research']['audiences'][0].get('futureField') == {'kept': True} and original['research'].get('futureList') == [1, 2, 3])
-        pg.goto(URL + '#research'); pg.wait_for_timeout(200)
+        show(pg, 'research')
         pg.click('summary:has-text("Current team parents")'); fill(pg, P('research.audiences.0.notes'), 'Edited note (fictional)')
         edited = stored(pg)
         check('editing a record keeps its unknown fields', edited['research']['audiences'][0].get('futureField') == {'kept': True} and edited['research']['audiences'][0]['notes'] == 'Edited note (fictional)')
@@ -178,9 +189,9 @@ with sync_playwright() as p:
         file_text = pathlib.Path(dl.value.path()).read_text(); pg.click('[data-action="toggle-save"]')
         check('downloaded backup holds the research exactly', json.loads(file_text) == edited)
         st = open_file(pg, PRACTICE); check('an older backup without research opens', 'Plan imported' in st, st)
-        pg.goto(URL + '#research'); pg.wait_for_timeout(200)
+        show(pg, 'research')
         check('older backup: research page shows empty states', 'No audience groups yet' in pg.inner_text('#app'))
-        pg.goto(URL + '#results'); pg.wait_for_timeout(200)
+        show(pg, 'results')
         check('older backup: results say no research is linked', 'No research linked to this option' in pg.inner_text('#app'))
         st = open_file(pg, file_text)
         check('reopening the downloaded backup restores the research exactly', 'Plan imported' in st and stored(pg) == edited, st)
@@ -205,10 +216,10 @@ with sync_playwright() as p:
         pg.click('[data-action="toggle-save"]'); pg.click('[data-action="restore-backup"]'); pg.click('[data-action="restore-backup"]'); pg.wait_for_timeout(250)
         check('restore previous plan brings the research back exactly', stored(pg) == good, pg.inner_text('#status'))
         # a deleted option leaves visible broken links
-        pg.goto(URL + '#step-options'); pg.wait_for_timeout(150)
+        show(pg, 'step-options')
         pg.click('[data-action="add-option"]'); pg.wait_for_timeout(150)
         pg.click('[data-action="del-option"][data-i="0"]'); pg.click('[data-action="del-option"][data-i="0"]'); pg.wait_for_timeout(200)
-        pg.goto(URL + '#research'); pg.wait_for_timeout(200)
+        show(pg, 'research')
         prob = pg.inner_text('#app .research-problems') if pg.locator('#app .research-problems').count() else ''
         check('deleting an option shows research linked to it as broken, keeping the records', 'linked to an option that no longer exists' in prob and len(stored(pg)['research']['audiences']) == 4, prob[:300])
         check('backups: no page errors', not errs, errs)
@@ -219,7 +230,7 @@ with sync_playwright() as p:
     def failing():
         ctx = b.new_context(viewport={'width': 1280, 'height': 900}); ctx.add_init_script(FAULTS); pg = ctx.new_page(); errs = []
         pg.on('pageerror', lambda e: errs.append(str(e)))
-        pg.goto(URL); open_file(pg, CONTROL); pg.goto(URL + '#research'); pg.wait_for_timeout(200)
+        pg.goto(URL); open_file(pg, CONTROL); show(pg, 'research')
         before = stored(pg)
         pg.evaluate("sessionStorage.setItem('__fault', JSON.stringify({all: true}))")
         pg.click('[data-action="add-research"][data-kind="audiences"]'); pg.wait_for_timeout(150)
@@ -237,7 +248,7 @@ with sync_playwright() as p:
     # 5. Phone width and keyboard
     def phone():
         ctx, pg, errs = new(viewport={'width': 375, 'height': 800}); pg.goto(URL); open_file(pg, EXAMPLE)
-        pg.goto(URL + '#research'); pg.wait_for_timeout(250)
+        show(pg, 'research')
         check('375px research page: no sideways scrolling (records closed)', no_hscroll(pg))
         pg.focus('details[data-rec] > summary >> nth=0'); pg.keyboard.press('Enter'); pg.wait_for_timeout(150)
         check('keyboard: Enter opens a record', pg.evaluate("document.querySelector('details[data-rec]').open"))
@@ -248,16 +259,16 @@ with sync_playwright() as p:
         pg.focus(box); pg.keyboard.press('Space'); pg.wait_for_timeout(200)
         check('keyboard: Space toggles a link box and focus stays on it', pg.evaluate('document.activeElement.dataset.researchToggle') == 'research.audiences.0.optionIds' and stored(pg)['research']['audiences'][0]['optionIds'] == [])
         check('a record stays open after an edit re-draws the page', pg.evaluate("document.querySelector('details[data-rec]').open"))
-        pg.goto(URL + '#results'); pg.wait_for_timeout(200)
+        show(pg, 'results')
         check('375px results with research: no sideways scrolling', no_hscroll(pg))
-        if shots: pg.goto(URL + '#research'); pg.wait_for_timeout(200); pg.screenshot(path=f'{shots}/research-375.png', full_page=True)
+        if shots: show(pg, 'research'); pg.screenshot(path=f'{shots}/research-375.png', full_page=True)
         check('phone: no page errors', not errs, errs)
         ctx.close()
     section('phone', phone)
 
     # 6. Board summary and print
     def board():
-        ctx, pg, errs = new(); pg.goto(URL); open_file(pg, EXAMPLE); pg.goto(URL + '#results'); pg.wait_for_timeout(250)
+        ctx, pg, errs = new(); pg.goto(URL); open_file(pg, EXAMPLE); show(pg, 'results')
         m = memo(pg)
         check('board summary: research on file per option, labeled fictional and not used in calculations', "Research on file (fictional; organizer's records; not used in any calculation)" in m, m[m.find('Research on'):][:300])
         check('board summary: similar events listed one by one with their status, no combined range', 'no combined price range' in m and 'FICTIONAL PTA charity golf day (Sep 12, 2026): $125 per person (advertised); $480 for a group of 4 (advertised); early-bird price' in m and '$125–$155' not in m, m[m.find('Similar events'):][:900])
@@ -279,7 +290,7 @@ with sync_playwright() as p:
         ctx, pg, errs = new(); pg.goto(URL); st = open_file(pg, ANALOGUES)
         check('analogues: real-plan file opens (no example banner)', 'Plan imported' in st and not pg.is_visible('#demo-banner'), st)
         before = money_view(pg)
-        pg.goto(URL + '#research'); pg.wait_for_timeout(250)
+        show(pg, 'research')
         t = pg.inner_text('.research .rsum >> nth=1')
         rows = {r.get_attribute('data-obs'): r.inner_text() for r in pg.query_selector_all('tr[data-obs]')}
         check('a partly comparable event is worded properly', 'Partly comparable' in rows.get('c_duo', ''), rows.get('c_duo'))
@@ -307,7 +318,7 @@ with sync_playwright() as p:
         check('print: observations and their status print with the option', 'FICTIONAL Park Fund scramble' in pg.inner_text('[data-research="golf"]') and pg.is_visible('[data-research="golf"]'))
         if shots: pg.pdf(path=f'{shots}/research-analogues-print.pdf')
         pg.emulate_media(media='screen')
-        if shots: pg.goto(URL + '#research'); pg.wait_for_timeout(200); pg.screenshot(path=f'{shots}/research-analogues.png', full_page=True)
+        if shots: show(pg, 'research'); pg.screenshot(path=f'{shots}/research-analogues.png', full_page=True)
         check('analogues: no page errors', not errs, errs)
         ctx.close()
     section('analogues', analogues)
@@ -318,7 +329,7 @@ with sync_playwright() as p:
         plan = json.loads(CONTROL); plan['research'] = {'audiences': [{'id': 'old_a', 'name': 'Old group (fictional)', 'unit': 'people', 'category': 'parents', 'reach': 50, 'source': 'flyer', 'overlapsWith': [], 'optionIds': ['golf']}],
             'comparables': [{'id': 'old_c', 'name': 'Old event (fictional)', 'sourceUrl': 'https://example.org/old', 'priceSingle': 120, 'feesPerPerson': 0, 'comparability': 'close', 'optionIds': ['golf']}], 'links': []}
         st = open_file(pg, json.dumps(plan)); check('legacy: an 08fed6b-era research file opens', 'Plan imported' in st, st)
-        pg.goto(URL + '#research'); pg.wait_for_timeout(200)
+        show(pg, 'research')
         t = pg.inner_text('#app')
         check('legacy: records show "provenance not recorded" and "not checked", not "sourced"', t.count('Provenance not recorded (older record)') >= 2 and 'Sourced observation' not in t.split('Similar events side by side')[0], t[:800])
         pg.click('summary:has-text("Old event (fictional)")'); pg.wait_for_timeout(150)
