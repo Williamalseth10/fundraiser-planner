@@ -974,6 +974,97 @@
     };
   }
 
+  // ---------- "Ready to commit?" (Batch 3, row 90) ----------
+  // Organizer criteria are optional: null or '' means UNKNOWN (never met), 0 is a deliberate value. Nothing is defaulted.
+  const known = (v) => !(v == null || v === '' || !Number.isFinite(Number(v)));
+
+  /**
+   * One option's readiness, built only from existing results: decide() (missing items, exposure), project() on the firm
+   * basis, evidenceStatus(), contractChecklist() and the organizer's criteria. It adds no new status: each criterion is
+   * met / unmet / unknown (the deadline is a timing fact), and the facts are kept apart so a profitable scenario is never
+   * read as likely attendance, firm sponsorship is never read as cash, and named interest is never read as payment.
+   * todayYMD is the LOCAL calendar date (the caller passes it).
+   */
+  function readiness(state, option, todayYMD) {
+    const cr = state.criteria && typeof state.criteria === 'object' ? state.criteria : {};
+    const dec = decide(state, option);
+    const firmCtx = firmContext(state, option);
+    const sp = option.scenarioParticipants || {};
+    const likelyReq = sp.middle, lowReq = sp.conservative;
+    const likely = project(option, likelyReq, firmCtx), low = project(option, lowReq, firmCtx);
+    const x = dec.exposure;
+    const criteria = [];
+
+    // 1. Minimum acceptable net proceeds: firm money at the likely number (low number shown beside it, not deciding).
+    if (!known(cr.minNet)) criteria.push({ key: 'minNet', result: 'unknown', threshold: null, value: likely.net, lowValue: low.net, participants: likely.participants, lowParticipants: low.participants });
+    else criteria.push({ key: 'minNet', result: c(likely.net) >= ci(cr.minNet) ? 'met' : 'unmet', threshold: d(ci(cr.minNet)), value: likely.net, lowValue: low.net, participants: likely.participants, lowParticipants: low.participants, lowMeets: c(low.net) >= ci(cr.minNet) });
+
+    // 2. Maximum acceptable loss, against two named exposures: canceling after the deadline (unknown terms stay unknown)
+    //    and running the event with low turnout (the lowest firm-money result at any feasible number at or above the paid count).
+    const limit = known(cr.maxLoss) ? ci(cr.maxLoss) : null;
+    const judge = (lossCents) => (limit == null || lossCents == null ? 'unknown' : lossCents <= limit ? 'met' : 'unmet');
+    const cancelLoss = x.lossIfCanceled == null ? null : c(x.lossIfCanceled);
+    const runLoss = c(x.worstOnChartLoss);
+    const parts = [
+      { key: 'cancel', result: judge(cancelLoss), loss: cancelLoss == null ? null : d(cancelLoss) },
+      { key: 'lowTurnout', result: judge(runLoss), loss: d(runLoss), participants: x.worstOnChart.participants, net: x.worstOnChart.net },
+    ];
+    const lossResult = limit == null ? 'unknown' : parts.some((q) => q.result === 'unmet') ? 'unmet' : parts.some((q) => q.result === 'unknown') ? 'unknown' : 'met';
+    criteria.push({ key: 'maxLoss', result: lossResult, threshold: limit == null ? null : d(limit), parts });
+
+    // 3. Volunteer hours: estimated need vs available. No dollar value is put on the time.
+    const need = known(option.volunteerHours) ? nonNeg(option.volunteerHours) : null;
+    const avail = known(state.volunteerHoursAvailable) ? nonNeg(state.volunteerHoursAvailable) : null;
+    criteria.push({ key: 'volunteers', result: need == null || avail == null ? 'unknown' : need <= avail ? 'met' : 'unmet', need, available: avail });
+
+    // 4. Decision deadline: a timing fact, never met or unmet.
+    const today = isCalendarDate(todayYMD) ? todayYMD : null;
+    const by = isCalendarDate(cr.decideBy) ? cr.decideBy : null;
+    const days = by && today ? daysBetween(today, by) : null;
+    criteria.push({ key: 'decideBy', result: by ? 'timing' : 'unknown', date: by, days, timing: !by ? 'unknown' : days == null ? 'set' : days < 0 ? 'passed' : days === 0 ? 'today' : 'upcoming' });
+
+    // What we know: separate facts.
+    const ev = state.evidence || {};
+    const evidence = evidenceStatus(state, option);
+    const paid = dec.paid, namedCounted = dec.namedCounted;
+    const likelyN = likely.participants;
+    const research = (state.research && Array.isArray(state.research.links)) ? state.research.links : [];
+    const reasonRecorded = research.some((l) => l && l.optionId === option.id && l.assumption === 'middle' && ((typeof l.note === 'string' && l.note.trim()) || (Array.isArray(l.researchIds) && l.researchIds.length)));
+    const attendance = {
+      likely: likelyN, paid, named: dec.named, namedCounted, anonymousYes: dec.definitely, evidenceState: evidence.state,
+      // Counts only. "covered" compares the likely number with people who have paid, then paid plus named "yes" for the
+      // current offer. Named answers are not payment; neither is a prediction.
+      coveredBy: likelyN <= paid ? 'paid' : likelyN <= paid + namedCounted ? 'paidAndNamed' : 'notCovered',
+      reasonRecorded,
+    };
+    const sponsor = sponsorshipCashCents(option, state.sponsorships, ['collected', 'committed']).byStatus;
+    const cash = {
+      neededBeforeEvent: x.cashNeededBeforeEvent, inHand: x.cashInHand, short: x.shortBeforeEvent,
+      collectedSponsorship: d(sponsor.collected), committedSponsorship: d(sponsor.committed), hopedSponsorship: d(sponsor.hoped),
+      registrationCashUnknown: !!dec.firm.upfront.registrationCashUnknown, fundingConfirmed: !!option.upfrontFundingConfirmed,
+    };
+    const k = contractChecklist(option, today);
+    const contract = {
+      quoteVerified: !!option.quoteVerified, costsVerified: !!option.costsVerified,
+      cancellationKnown: x.cancellationKnown, unresolved: k.unresolved, passed: k.passed,
+      next: k.dates.filter((q) => q.state === 'upcoming' || q.state === 'today').sort((a, b) => (a.days ?? 0) - (b.days ?? 0))[0] || null,
+    };
+
+    // Next actions, most important first. Never "approve", never "cancel", never a prediction.
+    const actions = [];
+    const crit = (key) => criteria.find((q) => q.key === key);
+    if (!contract.quoteVerified || !contract.cancellationKnown || contract.unresolved.length) actions.push('quote');
+    if (evidence.state === 'stale' || evidence.state === 'unrecorded' || attendance.coveredBy === 'notCovered') actions.push('reconfirm');
+    if (cash.short > 0 && !cash.fundingConfirmed) actions.push('cash');
+    if (crit('minNet').result === 'unmet' || crit('maxLoss').result === 'unmet') actions.push('adjust');
+    if (crit('volunteers').result !== 'met') actions.push('volunteers');
+    if (crit('minNet').result === 'unknown' || !known(cr.maxLoss)) actions.push('setCriteria');
+    if (crit('decideBy').timing === 'passed' || crit('decideBy').timing === 'today') actions.push('deadline');
+    actions.push('board');
+
+    return { criteria, attendance, cash, contract, missing: dec.missing, actions, status: dec.status, units: unitOf(option) };
+  }
+
   const STATUS_LABELS = {
     not_enough_evidence: 'Not enough evidence to decide yet',
     not_viable_as_configured: 'Not viable as currently configured',
@@ -988,7 +1079,7 @@
     registrationCents, worstCase, cancellationExposure, roundHeadline,
     project, participantsNeeded, netCurve, sensitivity, scenarioContext, firmContext, decide, offerTerms, evidenceStatus,
     whatWouldChange, compareOptions, hypotheticalPrice, pricingMargins,
-    interestFunnel, capacityShortcuts, compareAtSameTurnout, unitOf,
+    interestFunnel, capacityShortcuts, compareAtSameTurnout, unitOf, readiness,
     audienceSummary, comparableSummary, researchProblems, researchKind, researchVerification, RESEARCH_UNITS, AUDIENCE_CATEGORIES, PROVENANCES, VERIFICATIONS, contractChecklist, isCalendarDate, daysBetween, CONTRACT_DATES, CONTRACT_TEXT,
   };
 

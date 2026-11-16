@@ -712,6 +712,108 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     return L;
   }
 
+
+  // ---------- "Ready to commit?" (Batch 3, row 90): criteria, what we know, what is uncertain, what to do next ----------
+  // One set of words for the screen, the board summary and print, so their conclusions can't differ.
+  const READY_MARK = { met: ['✓', 'Met', 'yes'], unmet: ['✕', 'Not met', 'bad'], unknown: ['?', 'Unknown', 'no'], timing: ['•', 'Timing', 'no'] };
+  const lossWords = (net) => (net < 0 ? `a loss of ${hm(-net)}` : `${hm(net)}, so no loss`);
+  function readyWords(o, r) {
+    const t = T(o), many = t.many, buy = t.survey === 'buy', cr = state.criteria || {};
+    const [mn, ml, vo, db] = r.criteria;
+    const crit = [];
+    // 1. Minimum net proceeds (firm money, at the likely number).
+    const basis = `firm money (${buy ? 'sales' : 'ticket money'} plus sponsorship collected or promised in writing), at your likely number of ${mn.participants} ${many}`;
+    crit.push([mn.result, mn.result === 'unknown'
+      ? `Smallest amount worth raising: not set. On ${basis}, it would leave ${hm(mn.value)}.`
+      : `Smallest amount worth raising: ${hm(mn.threshold)}. On ${basis}, it leaves ${hm(mn.value)}. At your low number (${mn.lowParticipants}) it leaves ${hm(mn.lowValue)}${mn.lowMeets ? '' : ', below this amount'}.`]);
+    // 2. Largest acceptable loss, two named exposures.
+    const [cx, lx] = ml.parts;
+    const within = (q) => (ml.threshold == null || q.result === 'unknown' ? '' : q.result === 'met' ? ' (within the limit)' : ' (over the limit)');
+    const cancelText = cx.loss == null ? 'if you cancel after the deadline: unknown, because the cancellation terms are not entered' : `if you cancel after the deadline: ${hm(cx.loss)} owed and already spent${within(cx)}`;
+    const runText = `if you hold it and few come: the lowest firm-money result at ${lx.participants} ${many} or more is ${lossWords(lx.net)}${within(lx)}`;
+    crit.push([ml.result, `${ml.threshold == null ? 'Largest loss the club could accept: not set' : `Largest loss the club could accept: ${hm(ml.threshold)}`}. Exposure ${cancelText}; ${runText}.`]);
+    // 3. Volunteer hours (no dollar value).
+    crit.push([vo.result, vo.need == null ? 'Volunteer hours: the hours this option needs are not entered.'
+      : vo.available == null ? `Volunteer hours: about ${vo.need} needed; hours available are not entered.`
+        : `Volunteer hours: about ${vo.need} needed, ${vo.available} available${vo.result === 'met' ? '' : `, ${Math.round((vo.need - vo.available) * 10) / 10} short`}.${vo.need === 0 ? ' You entered 0 hours needed: check that is right.' : ''}`]);
+    // 4. Decision deadline (timing only).
+    const rel = db.days == null ? '' : db.days === 0 ? ' (today)' : db.days > 0 ? ` (in ${db.days} day${db.days === 1 ? '' : 's'})` : ` (${-db.days} day${db.days === -1 ? '' : 's'} ago)`;
+    crit.push([db.result, !db.date ? 'Decide by: not set.' : `Decide by: ${showDate(db.date)}${rel}.${db.timing === 'passed' ? ' The date has passed. That is timing, not a sign the event will or won’t work.' : ''}`, db.timing === 'passed' || db.timing === 'today']);
+
+    // What we know (each fact on its own).
+    const a = r.attendance, cash = r.cash, k = r.contract, know = [];
+    const paidW = buy ? `${a.paid} ${many} paid for` : `${a.paid} ${a.paid === 1 ? t.one : many} paid`;
+    const namedW = `${a.namedCounted} named “yes” for the current offer (not payment)`;
+    know.push(a.coveredBy === 'paid' ? `Attendance: your likely number is ${a.likely} ${many}. ${cap(paidW)}, which already reaches it.`
+      : a.coveredBy === 'paidAndNamed' ? `Attendance: your likely number is ${a.likely} ${many}. ${cap(paidW)} and ${namedW} reach it together. That is a count, not a prediction.`
+        : `Attendance: your likely number is ${a.likely} ${many}. ${cap(paidW)} and ${namedW} make ${a.paid + a.namedCounted}, ${a.likely - a.paid - a.namedCounted} short of it. The likely number is your assumption, not evidence.`);
+    if (a.named > a.namedCounted) know.push(`${a.named - a.namedCounted} named “yes” answers were for different or unrecorded terms and aren’t counted.`);
+    if (a.anonymousYes) know.push(`${a.anonymousYes} anonymous “yes” answers are shown but not counted.`);
+    know.push(`Cash: ${hm(cash.neededBeforeEvent)} is needed before the event; ${hm(cash.inHand)} is in hand (collected sponsorship and money actually received)${cash.registrationCashUnknown ? ', not counting money received from people who paid, which isn’t entered' : ''}. ${cash.short > 0 ? `Short by ${hm(cash.short)}${cash.fundingConfirmed ? ' (the club confirmed it can cover this)' : ' (not yet covered)'}.` : 'No shortfall.'}${cash.committedSponsorship ? ` ${hm(cash.committedSponsorship)} promised in writing counts in firm money but isn’t cash yet.` : ''}${cash.hopedSponsorship ? ` ${hm(cash.hopedSponsorship)} hoped-for isn’t counted.` : ''}`);
+    know.push(`Contract: ${k.quoteVerified ? `${t.venue} quote in writing` : `${t.venue} quote not in writing yet`}; ${k.costsVerified ? 'other costs are quotes' : 'other costs are estimates'}; cancellation terms ${k.cancellationKnown ? 'entered' : 'unknown'}.${k.next ? ` Next date: ${contractLabel(o, k.next.key)}, ${dateWords(k.next)}.` : ''}`);
+
+    // What remains uncertain: the existing must-verify list plus attendance and contract dates.
+    const unsure = [...r.missing];
+    if (a.coveredBy === 'notCovered') unsure.push(`Whether ${a.likely} ${many} will actually ${buy ? 'be bought' : 'come and pay'}: paid plus named “yes” is ${a.paid + a.namedCounted}.`);
+    if (!a.reasonRecorded) unsure.push('No reason is recorded for your likely number. Add one on the “Plan for low, likely and high” step.');
+    const dates = k.unresolved.filter((u) => !/owed if you cancel/i.test(u));
+    if (dates.length) unsure.push(`Contract details not entered: ${dates.join(', ')}.`);
+    if (k.passed.length) unsure.push(`Contract dates passed or due today: ${k.passed.join(', ')}. Check with the ${t.venue} what this means now.`);
+
+    // What to do next.
+    const next = r.actions.map((key) => ({
+      quote: k.quoteVerified
+        ? `Get the missing contract details from the ${t.venue} in writing: ${[!k.cancellationKnown && 'what you would owe if you cancel', ...dates.map((x) => x.toLowerCase())].filter(Boolean).join(', ')}.`
+        : `Get the written ${t.venue} quote${k.cancellationKnown ? '' : ', including what you would owe if you cancel'}${dates.length ? `, and these details: ${dates.join(', ').toLowerCase()}` : ''}.`,
+      reconfirm: a.evidenceState === 'stale' || a.evidenceState === 'unrecorded' ? 'Re-ask supporters about the current offer (price, date, what’s included), or confirm their answers still apply.' : `Collect paid sign-ups or named “yes” answers for the current offer before relying on ${a.likely} ${many}.`,
+      cash: `Agree how the club will cover the ${hm(cash.short)} due before the event, and have the treasurer confirm it.`,
+      adjust: 'Adjust the price, costs or scope until the numbers meet your criteria. “What would need to change?” in the planner can test this.',
+      volunteers: vo.result === 'unmet' ? `Find about ${Math.round((vo.need - vo.available) * 10) / 10} more volunteer hours, or reduce the scope.` : 'Confirm how many volunteer hours people can actually give.',
+      setCriteria: `Agree with the board on ${[mn.result === 'unknown' && 'the smallest amount worth raising', ml.threshold == null && 'the largest loss the club could accept'].filter(Boolean).join(' and ')}.`,
+      deadline: 'Your decide-by date has passed or is today. Confirm the real deadline with the board and the venue.',
+      board: 'Take this summary, with the open items above, to the board. The board decides: this planner doesn’t approve contracts or predict turnout.',
+    })[key]);
+    return { crit, know, unsure, next };
+  }
+  const READY_CAVEAT = 'Meeting a criterion in a scenario doesn’t mean people will come, and it doesn’t make a contract safe. Firm money counts promised sponsorship that isn’t cash yet.';
+  function readyCard(o) {
+    const r = E.readiness(state, o, localYMD()), w = readyWords(o, r);
+    const li = ([res, text, late]) => { const [icon, word, cls] = READY_MARK[res]; return `<li class="${late ? 'late' : cls}"><span aria-hidden="true">${icon}</span><span><b>${word}:</b> ${esc(text)}</span></li>`; };
+    return `<article class="ready" data-ready="${esc(o.id)}" aria-labelledby="ready-${esc(o.id)}"><h3 id="ready-${esc(o.id)}">${esc(o.name)}</h3>
+      <div class="ready-grid">
+        <section><h4>What the numbers require</h4><ul class="standing crit">${w.crit.map(li).join('')}</ul></section>
+        <section><h4>What we know</h4><ul class="plain">${w.know.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></section>
+        <section><h4>What remains uncertain</h4>${w.unsure.length ? `<ul class="plain miss">${w.unsure.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="hint">Nothing flagged from what you entered.</p>'}</section>
+        <section><h4>What to do next</h4><ol class="next">${w.next.map((x) => `<li>${esc(x)}</li>`).join('')}</ol></section>
+      </div></article>`;
+  }
+  function criteriaLine() {
+    const cr = state.criteria || {}, v = (x) => (x == null || x === '' ? 'not set' : hm(x));
+    return `Decision criteria: smallest amount worth raising ${v(cr.minNet)}; largest loss the club could accept ${v(cr.maxLoss)}; volunteer hours available ${state.volunteerHoursAvailable == null || state.volunteerHoursAvailable === '' ? 'not entered' : state.volunteerHoursAvailable}; decide by ${E.isCalendarDate(cr.decideBy) ? showDate(cr.decideBy) : 'not set'}.`;
+  }
+  function readySection() {
+    return `<section class="panel ready-panel" aria-labelledby="ready-title"><h2 id="ready-title">Ready to commit?</h2>
+      <p class="hint">Your own limits, checked against each option. Blank means not decided yet; 0 is a real answer. Nothing here signs or approves anything.</p>
+      <div class="fields noprint">
+        ${num('criteria.minNet', 'Smallest amount after costs that makes this worth doing ($)', { placeholder: 'not set', help: 'Checked against firm money at your likely number.' })}
+        ${num('criteria.maxLoss', 'Largest loss the club could accept ($)', { placeholder: 'not set', help: 'Checked against canceling after the deadline and against holding it with low turnout.' })}
+        ${num('volunteerHoursAvailable', 'Volunteer hours your club can realistically give', { placeholder: 'not sure' })}
+        ${dateIn('criteria.decideBy', 'Decide by', 'A date for the board’s decision. Timing only.')}
+      </div>
+      <p class="printonly">${esc(criteriaLine())}</p>
+      ${state.options.map(readyCard).join('')}
+      <p class="hint">${esc(READY_CAVEAT)}</p></section>`;
+  }
+  function readyMemoLines(o) {
+    const w = readyWords(o, E.readiness(state, o, localYMD())), L = ['', '### Ready to commit?', '**What the numbers require**'];
+    w.crit.forEach(([res, text]) => L.push(`- [${READY_MARK[res][1]}] ${text}`));
+    L.push('', '**What we know**'); w.know.forEach((x) => L.push(`- ${x}`));
+    L.push('', '**What remains uncertain**'); (w.unsure.length ? w.unsure : ['Nothing flagged from what was entered.']).forEach((x) => L.push(`- ${x}`));
+    L.push('', '**What to do next**'); w.next.forEach((x, i) => L.push(`${i + 1}. ${x}`));
+    L.push('');
+    return L;
+  }
+
   // ---------- results ----------
   function chart(o, curve, marks, target) {
     if (!curve.length) return '';
@@ -1076,6 +1178,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     if (state.isDemo) L.push('**FICTIONAL EXAMPLE: every number is made up. Not a recommendation for any real event.**');
     L.push(`Prepared ${showDate(localYMD())} from the organizer's entries. This is a planning summary, not a record of board approval.`);
     L.push(`Fundraising target: ${money(state.settings.fundraisingTarget || 0)} after costs. Figures are rounded to the nearest dollar.`);
+    L.push(criteriaLine(), `_${READY_CAVEAT}_`);
     for (const o of state.options) {
       const a = analyse(o), d = a.dec, P = a.proj;
       L.push('', `## ${o.name}`, `**Status: ${E.STATUS_LABELS[d.status]}**`);
@@ -1098,6 +1201,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
       batch2Lines(o).forEach((l) => L.push(`- ${l}`));
       const rl = researchLines(o);
       if (rl.length) { L.push(`- Research on file (${state.isDemo ? 'fictional; ' : ''}organizer's records; not used in any calculation):`); rl.forEach((l) => L.push(l.startsWith('  ') ? `    - ${l.trim()}` : `  - ${l}`)); }
+      readyMemoLines(o).forEach((l) => L.push(l));
     }
     const au = E.audienceSummary(state);
     if (au.groups || au.fictionalLeftOut) {
@@ -1520,6 +1624,7 @@ Report raw counts, never percentages applied to a whole school or community. Sur
         <p id="live-status" class="sr-only" aria-live="polite">${esc(live)}</p>
       </header>
       <section class="panel" aria-label="Answers for each option">${renderSummary(all)}</section>
+      ${readySection()}
       ${renderWhatIf()}
       ${sameTurnoutPanel()}
       ${state.options.length > 1 ? `<section class="panel"><h2>Side by side</h2>${renderComparison(all)}</section>` : ''}
@@ -1856,6 +1961,8 @@ Report raw counts, never percentages applied to a whole school or community. Sur
     }
     if (!isObj(s.settings) || !isNum(s.settings.fundraisingTarget) || !isNum(s.settings.volunteerHourValue)) p.push('Plan settings are missing or not numbers.');
     if (!isNum(s.volunteerHoursAvailable)) p.push('Volunteer hours available must be a number.');
+    // Decision criteria (optional; row 90): blank = not set, numbers 0 or more, a real calendar date.
+    if (s.criteria != null && (!isObj(s.criteria) || !isNum(s.criteria.minNet) || !isNum(s.criteria.maxLoss) || !(s.criteria.decideBy == null || s.criteria.decideBy === '' || E.isCalendarDate(s.criteria.decideBy)))) p.push('Decision criteria must be amounts of 0 or more and a calendar date.');
     if (s.snapshot != null && (!isObj(s.snapshot) || Object.values(s.snapshot).some((v) => !isStr(v)))) p.push('Survey details must be text.');
     // Research (optional; row 84). Imported research is untrusted: every known field is type-checked. Unknown extra fields
     // are kept but never shown. Links may point at a missing option or record: that is shown, not refused.
