@@ -2,8 +2,8 @@
 
 ## Architecture
 - `src/engine.js`: the pure, deterministic financial engine. It has no DOM, no randomness, and no AI. Money is handled in integer cents. It runs in both Node and the browser.
-- `src/demo-data.js`: the two **fictional** examples (golf; gala vs. product sale) and a blank plan.
-- `src/app.js` + `src/index.src.html`: a vanilla-JS website. Home, a 10-step wizard, results, and a "How to use" guide, switched by the URL hash (`#home`, `#step-quote`, `#results`, `#guide`). There is no framework and no runtime dependency.
+- `src/blank-plan.js` supplies the empty starting plan. `test/fixtures/plans.js` supplies fictional plans for automated tests. The published HTML includes only the empty starting plan.
+- `src/app.js` + `src/index.src.html`: a vanilla-JS website. Home, a 10-step wizard, decision brief, full analysis, research and a volunteer guide use URL hash routes (`#home`, `#step-quote`, `#decision`, `#results`, `#research`, `#guide`). There is no framework and no runtime dependency.
 - `scripts/build.js`: inlines everything into `dist/booster-fundraiser-planner.html`, a single file that opens offline by double-clicking, and copies it to `index.html` for GitHub Pages.
 - Tests: `test/*.test.js` (engine, `node --test`) and `test/ui_*.py` (browser, Playwright + Chromium).
 
@@ -11,7 +11,7 @@
 | Key | What |
 |---|---|
 | `bfp-plan-v1` | The current plan, saved after every change once the person has started a plan. |
-| `bfp-plan-v1-backup` | One previous plan, kept automatically before an example, a blank plan or an opened file replaces the current one. Example plans never overwrite a real backup. "Restore previous plan" swaps the two. |
+| `bfp-plan-v1-backup` | One previous plan, kept before a new plan or opened file replaces saved work. An older imported or saved fictional plan cannot displace a real backup. "Restore previous plan" swaps the two. |
 | `bfp-plan-v1-backup-at` | When the backup was kept. |
 | `bfp-plan-v1-unreadable` | A saved plan that failed the safety check at startup, kept aside so later typing can't overwrite it. |
 
@@ -50,7 +50,7 @@ EventOption {
                quoteSource, cancellationNotes, weatherNotes: short text }   (optional, row 78; never used in the math)
 }
 Sponsorship { id, label, amount, status: collected|committed|hoped, type: cash|inKind, replacesCostId?, optionId? }
-research? {                                   (optional, row 84; never read by any calculation)
+research? {                                   (optional; research summaries do not supply the current financial projection)
   audiences:   [{ id, name, provenance?: observation|estimate|fictional, verification?: unchecked|checked|conflicting,
                   category: parents|alumni|businesses|golfers|community|staff|other,
                   unit: people|households|businesses|organizations|other, reach|null, contacted|null, responded|null,
@@ -74,10 +74,29 @@ research? {                                   (optional, row 84; never read by a
 
 **Research schema note (rows 84-85):** provenance and verification are explicit; a missing provenance reads as "not recorded (older record)" and a missing verification as "not checked", and neither is ever inferred from a source or URL. In a real plan, fictional records are listed but left out of every summary. There is no combined price range: similar events are listed side by side. `research` is optional and additive, so `schemaVersion` stays 1, older plans and files load unchanged, and nothing is migrated. Every known research field is type-checked on import; a bad record refuses the whole file. Unknown extra fields are kept. References to a missing option or record are allowed and shown as broken, never dropped. Research summaries (`audienceSummary`, `comparableSummary`, `researchProblems`, `researchKind`) never read or change the money model.
 
+## Club decision and historical records
+
+The idea finder matches selected resources to a fixed catalogue and offers up to three formats with a first research task. Selecting a format uses the same empty option structure as the existing chooser. `recommendEvents` assesses priced options separately. It uses the existing decision brief and readiness checks, then ranks qualifying options by firm net at their own likely counts. A tied rank is shared. An alternative with missing evidence keeps the overall comparison open.
+
+`board-questions.js` reads the current plan. The golf comparison requires two checked quotes and matching recorded paid counts and receipts. It shows the shotgun-specific sponsorship needed for parity and the gap to the minimum separately. The auction question removes one largest donated lot already counted in likely proceeds, holds the other inputs constant and compares the resulting net with the board minimum. The computed answers do not modify the saved budget.
+
+| Optional field | Meaning |
+| --- | --- |
+| `options[].clubHistoryResearch.golfWeeks`, `golfAsOf`, `golf[]` | The current lead time and the date it was confirmed, plus prior dated registration checkpoints. The club compares paid counts at the same weeks out using a source and an explicit comparability choice. |
+| `options[].clubHistoryResearch.lots[]` | Planned auction items, their organizer-estimated net proceeds, donated and included-in-likely flags, and per-item `comps[]` with past date, source, sold or confirmed-unsold outcome, bid and fees. Unknown fees leave the historical net unknown. |
+| `options[].forecastDraft` | Event date, board’s independent net estimate, chosen prior event ID and organizer declaration that the decision is pending. Cleared when the capture succeeds. |
+| `research.clubHistory[].forecast` | Frozen event name, scheduled date, pre-decision declaration, `boardNet`, prior comparator snapshot and `amounts`. Original capture date, estimated turnout and net stay on the historical record. |
+| `research.clubHistory[].actualAmounts`, `actualNet`, `finalizedOn` | Final admissions or product sales, cash sponsorship, other proceeds and event costs. All four known amounts yield a net. A separately reported ledger net can stand alone. Conflicting totals must be reconciled before confirmation. |
+| `research.clubHistory[].fromPriorPlan` | A completed record added from another plan backup. Its option ID is never treated as a link to the current plan. |
+
+The forecast uses the likely `project()` result. `ticketSales + sponsorship + other − costs` equals its saved net in cents. Other includes scenario add-ons and net auction proceeds. Each actual category has a signed difference from its frozen estimate. A positive cost difference means an overrun. Editing final inputs clears their confirmation.
+
+Scoring uses pre-decision captures with a future event date fixed at the time, a source, elapsed event and confirmed final accounts. Manually re-entered estimates and legacy snapshots without recorded decision timing remain readable. Duplicate event names on the same calendar date are withheld. The planner reports mean absolute dollar error, overestimates and sample size. Board, planner and prior-comparable errors use the same subset of events with all three frozen estimates. The browser clock, accounts, comparable selection and pre-decision declaration come from the organizer.
+
 ## Core rules (all covered by tests)
 - **Feasible headcounts:** 0 up to capacity, in whole groups when required. Never rounded up. Counts below the number already paid aren't scanned.
 - **Venue bill:** `max(flatFee + perParticipant × max(n, minimumParticipants), minimumSpend)`. A non-refundable credited deposit sets a floor on the bill.
-- **Deposit:** always cash needed up front. Credited: part of the bill. Separate and non-refundable: an extra cost. Refundable and separate: not a cost.
+- **Deposit:** always cash needed up front. Credited: part of the bill. Separate and non-refundable: an extra cost. Refundable and separate: not a cost. For a positive deposit, an unanswered credit or refund question leaves the offer open for review. A zero deposit requires neither answer. Older explicit yes/no answers retain their stored meaning.
 - **In-kind:** never revenue. It reduces only the one-time cost it replaces, up to that cost's amount, never below zero.
 - **Money inputs:** negative or non-numeric values count as 0 in the engine.
 - **Firm money** (`firmContext`): ticket money (money actually received for tickets already paid, plus the current price for the rest) and collected or committed sponsorship and in-kind, with the conservative cost cushion. No add-ons, other income or auction estimates. Used for break-even, the target, the chart and the cash-needed card.
@@ -97,5 +116,5 @@ research? {                                   (optional, row 84; never read by a
 
 ## Next steps (proposed)
 1. One real session: the organizer enters a real quote with someone watching (see `PILOT_KIT.md`), and you record what was confusing.
-2. Publication is complete. Obtain William's approval for any new production batch (see `README.md`).
+2. GitHub Pages hosts the previously approved release. Obtain William’s approval before publishing this review batch (see `README.md`).
 3. Revisit cancellation dates (what is owed at each date) once a real contract shows that structure.

@@ -5,12 +5,12 @@ const vm = require('node:vm');
 const E = require('../src/engine.js');
 function appFixture() {
   const context = vm.createContext({window:{BFEngine:E}, console});
-  vm.runInContext(fs.readFileSync('src/demo-data.js','utf8'),context);
+  vm.runInContext(fs.readFileSync('src/blank-plan.js','utf8'),context);
   let src=fs.readFileSync(process.env.APP_SOURCE || 'src/app.js','utf8');
   src=src.slice(0,src.indexOf("  document.addEventListener('change', onChange);"));
   src += '\n window.testUI={setPlan:p=>{state=p;},quote:stepQuote,prices:stepPrices,individual:typeof useIndividualItems === "function" ? useIndividualItems : undefined};})();';
   vm.runInContext(src,context);
-  const plan=JSON.parse(JSON.stringify(context.window.BFDemo.BLANK_STATE));
+  const plan=JSON.parse(JSON.stringify(context.window.BFPlan.BLANK_STATE));
   plan.options[0].kind='product';
   context.window.testUI.setPlan(plan);
   return {ui:context.window.testUI,plan};

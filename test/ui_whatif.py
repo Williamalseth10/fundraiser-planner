@@ -4,6 +4,7 @@
 # Sections never stop the run: a section that throws is recorded as a failure, so this file also reports cleanly
 # against an older build (that is how the "fails before the change" evidence was produced).
 import sys, json, pathlib, re, traceback
+from plan_fixtures import import_fixture
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -26,7 +27,9 @@ def open_file(pg, text, name='plan.json'):
     if not pg.is_visible('#save-panel'): pg.click('[data-action="toggle-save"]')
     pg.set_input_files('input[data-action="import-json"]', files=[{'name': name, 'mimeType': 'application/json', 'buffer': text.encode()}])
     pg.wait_for_timeout(250)
-    status = pg.inner_text('#status'); pg.click('[data-action="toggle-save"]'); return status
+    status = pg.inner_text('#status')
+    if pg.is_visible('#save-panel'): pg.click('header [data-action="toggle-save"]')
+    return status
 def plan_json(pg): return pg.evaluate("localStorage.getItem('bfp-plan-v1')")
 def capture_memo(pg):
     pg.evaluate("""() => { window.__copied = null;
@@ -196,7 +199,7 @@ with sync_playwright() as p:
         pg.click('[data-action="toggle-save"]')
         # the practice file is marked as made up, so it never pushed the real (golf) plan out of the backup
         check('backup still holds the real golf plan, not the made-up practice file', 'FICTIONAL PRACTICE — Booster Club Golf Day' in pg.inner_text('#backup-line'), pg.inner_text('#backup-line'))
-        pg.click('[data-action="load-demo"]'); pg.click('[data-action="load-demo"]'); pg.wait_for_timeout(200)
+        import_fixture(pg, 'golf')
         pg.click('[data-action="toggle-save"]'); pg.wait_for_timeout(80)
         pg.click('[data-action="restore-backup"]'); pg.click('[data-action="restore-backup"]'); pg.wait_for_timeout(200)
         check('restore brings the plan with its contract dates back exactly', json.loads(plan_json(pg)) == json.loads(original), pg.inner_text('#status'))
@@ -207,7 +210,7 @@ with sync_playwright() as p:
     # 5. Options compared, phone width, keyboard, print
     def layout():
         ctx, pg, errs = new(viewport={'width': 375, 'height': 800}); pg.goto(URL)
-        pg.click('[data-demo="gala"]'); pg.wait_for_function("location.hash === '#step-event'")
+        import_fixture(pg, 'gala')
         pg.goto(URL + '#results'); pg.wait_for_timeout(200)
         wi = pg.inner_text('.whatif')
         check('options compared: both gala and cookie dough rows, each at its own likely number', 'Compare with your other options' in wi and 'Cookie dough sale' in wi and '(selected)' in wi)
@@ -277,7 +280,10 @@ with sync_playwright() as p:
         pg.goto(URL + '#step-options'); pg.wait_for_timeout(120)
         pg.select_option(path('options.0.kind'), 'product'); pg.wait_for_timeout(120)
         pg.goto(URL + '#step-quote'); pg.wait_for_timeout(120)
-        fill(pg, path('options.0.venueQuote.perParticipant'), 6); fill(pg, path('options.0.capacity'), 100)
+        quote = {'venueQuote.flatFee': 0, 'venueQuote.perParticipant': 6, 'venueQuote.minimumParticipants': 0,
+                 'venueQuote.minimumSpend': 0, 'deposit.amount': 0, 'capacity': 100}
+        for field, amount in quote.items():
+            fill(pg, path('options.0.' + field), amount)
         check('parity setup: product option kept the inherited grouping', 'Check inherited group settings' in pg.inner_text('#app'))
         pg.goto(URL + '#results'); pg.wait_for_timeout(200)
         pg.select_option('[data-whatif="at"]', 'custom'); pg.wait_for_timeout(120); fill(pg, '[data-whatif="custom"]', 48)

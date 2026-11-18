@@ -21,6 +21,158 @@ const base = () => ({
 });
 const ctx = (extra = {}) => ({ sponsorships: [], statuses: ['collected', 'committed'], ...extra });
 
+function clubExample() {
+  const option = {
+    ...base(), kind: 'auction', groupSize: 1, wholeGroupsOnly: false, capacity: 100,
+    quoteVerified: true, costsVerified: true,
+    scenarioParticipants: { conservative: 20, middle: 40, optimistic: 80 },
+    scenarioProceeds: { conservative: 0, middle: 700, optimistic: 1500 },
+  };
+  const state = {
+    options: [option], snapshot: {},
+    evidence: { paidRegistrations: { opt: 4 }, paidCashReceived: { opt: 300 }, namedHighIntent: { opt: 36 }, offerTerms: { opt: E.offerTerms(option, {}) } },
+    sponsorships: [{ status: 'collected', amount: 50 }, { status: 'committed', amount: 200 }, { status: 'hoped', amount: 1000 }],
+    scenarioSettings: { middle: { statuses: ['collected', 'committed', 'hoped'], extraRevenuePerParticipant: 5 } },
+  };
+  return { state, option };
+}
+
+test('decision brief measures the unpaid sales gap and keeps receipts, written support and estimated bids on their respective bases', () => {
+  const { state, option } = clubExample();
+  const before = JSON.stringify(state);
+  const b = E.decisionBrief(state, option);
+  // Middle tickets = $300 actually paid + 36 x $150. Costs = $500 + 40 x $80.
+  assert.equal(b.cases.middle.firmNet, 2250);
+  assert.equal(b.cases.middle.net, 4150); // adds $700 bids, $1,000 hoped sponsorship and 40 x $5
+  assert.equal(b.cases.middle.salesStillNeeded, 36);
+  assert.equal(b.namedAtCurrentOffer, 36);
+  assert.deepEqual(b.atPaidOnly, { participants: 4, net: -270, issue: null });
+  assert.deepEqual(b.breakEven, { participants: 8, additionalPaid: 4, dipsAt: null, issue: null });
+  assert.equal(JSON.stringify(state), before);
+  option.price = 175;
+  const changed = E.decisionBrief(state, option);
+  assert.equal(changed.atPaidOnly.net, -270);
+  assert.equal(changed.namedAtCurrentOffer, 0);
+  assert.equal(changed.cases.middle.salesStillNeeded, 36);
+});
+
+test('decision brief withholds missing or physically inconsistent cases and preserves valid zero and capping', () => {
+  const { state, option } = clubExample();
+  option.scenarioParticipants = { conservative: '', middle: 3, optimistic: 120 };
+  let b = E.decisionBrief(state, option);
+  assert.equal(b.cases.conservative.issue, 'missing');
+  assert.equal(b.cases.conservative.net, null);
+  assert.equal(b.cases.middle.issue, 'belowPaid');
+  assert.equal(b.cases.middle.firmNet, null);
+  assert.equal(b.cases.optimistic.participants, 100);
+  assert.deepEqual(b.cases.optimistic.flags, ['over_capacity']);
+  state.evidence.paidCashReceived.opt = null;
+  b = E.decisionBrief(state, option);
+  assert.equal(b.paidCashMissing, true);
+  assert.equal(b.cases.optimistic.net, null);
+  assert.equal(b.atPaidOnly.issue, 'paidCashMissing');
+  assert.equal(b.breakEven.participants, null);
+  state.evidence.paidCashReceived.opt = 0;
+  option.groupSize = 3; option.wholeGroupsOnly = true;
+  b = E.decisionBrief(state, option);
+  assert.equal(b.cases.optimistic.issue, null);
+  assert.equal(b.atPaidOnly.issue, 'partialGroup');
+  option.capacity = 3;
+  assert.equal(E.decisionBrief(state, option).breakEven.issue, 'capacityBelowPaid');
+  state.evidence.paidRegistrations.opt = 0;
+  option.scenarioParticipants.middle = 0;
+  assert.equal(E.decisionBrief(state, option).cases.middle.net, 1450); // $250 firm + $1,000 hoped + $700 bids - $500
+  state.evidence.paidCashReceived.opt = 100;
+  assert.equal(E.decisionBrief(state, option).cases.middle.issue, 'cashWithoutPaid');
+  option.capacity = 0;
+  assert.equal(E.decisionBrief(state, option).breakEven.issue, 'noCapacity');
+});
+
+test('club comparison requires usable scenarios, checked costs and current evidence before identifying the highest middle-case firm net', () => {
+  const { state, option } = clubExample();
+  const first = E.decisionBrief(state, option);
+  const compare = () => E.compareClubEstimates([first, E.decisionBrief(state, option)]);
+  option.scenarioProceeds.middle = 100000;
+  assert.deepEqual(compare(), { reason: 'tie', leaderIndices: [0, 1], firmLeaderNet: 2250, scenarioLeaderIndices: [1], scenarioLeaderNet: 103450 });
+  option.fixedCosts[0].amount += 0.01;
+  assert.deepEqual(compare(), { reason: 'compared', leaderIndices: [0], firmLeaderNet: 2250, scenarioLeaderIndices: [1], scenarioLeaderNet: 103449.99 });
+  state.evidence.surveyProbablyAtPrice = { opt: 90 };
+  option.price = 160; // existing named answers are stale
+  assert.deepEqual(compare(), { reason: 'turnoutEvidence', leaderIndices: [], firmLeaderNet: null, scenarioLeaderIndices: [], scenarioLeaderNet: null });
+  state.evidence.offerTerms.opt = E.offerTerms(option, {});
+  assert.deepEqual(compare(), { reason: 'compared', leaderIndices: [1], firmLeaderNet: 2609.99, scenarioLeaderIndices: [1], scenarioLeaderNet: 103809.99 });
+  option.costsVerified = false;
+  assert.equal(compare().reason, 'quoteOrCosts');
+  option.scenarioParticipants.conservative = 60;
+  assert.equal(compare().reason, 'scenarioOrder');
+  option.scenarioParticipants.optimistic = null;
+  assert.equal(compare().reason, 'incomplete');
+  assert.equal(E.compareClubEstimates([first]).reason, 'single');
+});
+
+test('golf and auction can lead on different bases, tie for full scenario net, or both lose money', () => {
+  const { state, option } = clubExample();
+  const golf = { ...option, kind: 'golf_shotgun', fixedCosts: [{ amount: 1000 }] };
+  const auction = { ...option, kind: 'auction', fixedCosts: [{ amount: 2000 }] };
+  function brief(o) {
+    state.evidence.offerTerms.opt = E.offerTerms(o, {});
+    return E.decisionBrief(state, o);
+  }
+  const compare = () => E.compareClubEstimates([brief(golf), brief(auction)]);
+  auction.scenarioProceeds.middle = 1200;
+  let result = compare();
+  assert.deepEqual(result.leaderIndices, [0]);
+  assert.deepEqual(result.scenarioLeaderIndices, [1]);
+  assert.equal(result.firmLeaderNet, 1750);
+  assert.equal(result.scenarioLeaderNet, 3150);
+  auction.scenarioProceeds.middle = 1000;
+  result = compare();
+  assert.deepEqual(result.scenarioLeaderIndices, [0, 1]);
+  assert.equal(result.scenarioLeaderNet, 2950);
+  golf.fixedCosts[0].amount += 4000;
+  auction.fixedCosts[0].amount += 4000;
+  result = compare();
+  assert.equal(result.firmLeaderNet, -2250);
+  assert.equal(result.scenarioLeaderNet, -1050);
+  assert.deepEqual(result.leaderIndices, [0]);
+  assert.deepEqual(result.scenarioLeaderIndices, [0, 1]);
+});
+
+test('missing cost, admission, quote or deposit withholds a decision estimate; explicit zeros are usable', () => {
+  const { state, option } = clubExample();
+  const real = (property, key, issue) => {
+    const value = property[key];
+    property[key] = '';
+    const incomplete = E.decisionBrief(state, option);
+    assert.deepEqual([incomplete.cases.middle.net, incomplete.cases.middle.firmNet, incomplete.cases.middle.issue], [null, null, issue]);
+    assert.equal(incomplete.breakEven.issue, issue);
+    property[key] = 0;
+    assert.equal(E.decisionBrief(state, option).cases.middle.issue, null);
+    property[key] = value;
+  };
+  real(option, 'price', 'missingPrice');
+  real(option.perParticipantCosts[0], 'amount', 'missingCost');
+  real(option.fixedCosts[1], 'amount', 'missingCost');
+  for (const key of ['flatFee', 'perParticipant', 'minimumSpend', 'minimumParticipants']) real(option.venueQuote, key, 'missingQuote');
+  real(option.deposit, 'amount', 'missingQuote');
+});
+
+test('an unentered auction bid estimate leaves scenario net unknown and keeps the firm comparison basis available', () => {
+  const { state, option } = clubExample();
+  const complete = E.decisionBrief(state, option);
+  for (const absent of ['', null, undefined]) {
+    option.scenarioProceeds.middle = absent;
+    const b = E.decisionBrief(state, option);
+    assert.equal(b.cases.middle.issue, 'missingBid');
+    assert.equal(b.cases.middle.net, null);
+    assert.equal(b.cases.middle.firmNet, 2250);
+    assert.equal(b.breakEven.participants, 8);
+    assert.equal(E.compareClubEstimates([complete, b]).reason, 'incomplete');
+  }
+  option.scenarioProceeds.middle = 0;
+  assert.equal(E.decisionBrief(state, option).cases.middle.net, 3450);
+});
+
 test('zero attendance: no revenue, fixed costs still owed', () => {
   const r = E.project(base(), 0, ctx());
   assert.equal(r.revenue.total, 0);
@@ -321,4 +473,38 @@ test('free-admission auction: high risk if the low auction estimate covers costs
   assert.equal(d.status, 'high_risk');                       // but the organizer's low auction figure would
   o.scenarioProceeds.conservative = 1000;                     // 1000 < 2000 + 500 fixed costs
   assert.equal(E.decide(st, o).status, 'not_viable_as_configured');
+});
+
+test('same-turnout scenario and comparison estimates reconcile exactly across income, sponsors and cost cushions', () => {
+  const state = structuredClone(require('./fixtures/close-golf-offers-fictional.json'));
+  const [a, b] = state.options;
+  const result = (option) => E.decisionBrief(state, option);
+  const check = (option) => {
+    const brief = result(option), v = brief.likelyAdjustments, m = brief.cases.middle;
+    const cents = (n) => Math.round(n * 100);
+    const delta = cents(v.extraIncome) + cents(v.cashSponsorChange) + cents(v.inKindSavingsChange)
+      + cents(v.comparisonCushion) - cents(v.scenarioCushion);
+    assert.equal(cents(m.firmNet) + delta, cents(m.net));
+    return v;
+  };
+  assert.equal(result(a).cases.middle.firmNet, 4150);
+  assert.equal(result(b).cases.middle.net, 4180);
+  assert.equal(result(b).cases.middle.firmNet, 4130);
+  assert.deepEqual(check(b), {extraIncome: 0, cashSponsorChange: 0, inKindSavingsChange: 0, comparisonCushion: 50, scenarioCushion: 0});
+
+  // The likely case can count fewer cash and in-kind promises while adding other income.
+  state.sponsorships = [
+    {type: 'cash', amount: 35.12, status: 'committed', optionId: b.id},
+    {type: 'inKind', amount: 20.25, status: 'committed', optionId: b.id, replacesCostId: b.fixedCosts[0].id},
+  ];
+  const likely = state.scenarioSettings.middle;
+  likely.statuses = ['collected'];
+  likely.otherRevenue = 15.25;
+  likely.extraRevenuePerParticipant = 0.50;
+  likely.costContingencyPct = 5;
+  assert.deepEqual(check(b), {extraIncome: 51.25, cashSponsorChange: -35.12, inKindSavingsChange: -20.25, comparisonCushion: 47.98, scenarioCushion: 25});
+  check(a);
+  b.scenarioParticipants.middle = null;
+  assert.equal(result(b).likelyAdjustments, null);
+  assert.equal(result(b).cases.middle.net, null);
 });

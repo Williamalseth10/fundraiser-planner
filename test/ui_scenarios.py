@@ -3,6 +3,7 @@
 # Real clicks and keys; each section in a fresh browser context (separate storage); fictional data only.
 # A section that throws is recorded as a failure, so this also reports cleanly against an older build.
 import sys, json, pathlib
+from plan_fixtures import import_fixture
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -21,7 +22,9 @@ def stored(pg): return json.loads(pg.evaluate("localStorage.getItem('bfp-plan-v1
 def open_file(pg, text):
     if not pg.is_visible('#save-panel'): pg.click('[data-action="toggle-save"]')
     pg.set_input_files('input[data-action="import-json"]', files=[{'name': 'p.json', 'mimeType': 'application/json', 'buffer': text.encode()}])
-    pg.wait_for_timeout(300); st = pg.inner_text('#status'); pg.click('[data-action="toggle-save"]'); return st
+    pg.wait_for_timeout(300); st = pg.inner_text('#status')
+    if pg.is_visible('#save-panel'): pg.click('header [data-action="toggle-save"]')
+    return st
 def memo(pg):
     pg.evaluate("""() => { window.__copied = null;
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: (t) => { window.__copied = t; return Promise.resolve(); } } });
@@ -101,7 +104,7 @@ with sync_playwright() as p:
         check('older backup: sent-to shows "not recorded", no past rounds', 'not recorded' in pg.inner_text('#app') and 'Past rounds' not in pg.inner_text('#app'))
         st = open_file(pg, file_text)
         check('reopening the downloaded backup restores it exactly', 'Plan imported' in st and stored(pg) == saved, st)
-        pg.click('[data-action="toggle-save"]'); two_clicks(pg, '[data-action="load-demo"]')
+        import_fixture(pg, 'golf')
         pg.click('[data-action="toggle-save"]'); two_clicks(pg, '[data-action="restore-backup"]')
         check('restore previous plan brings the past round back exactly', stored(pg) == saved, pg.inner_text('#status'))
         if shots: pg.goto(URL + '#step-evidence'); pg.wait_for_timeout(200); pg.screenshot(path=f'{shots}/b2-evidence.png', full_page=True)
@@ -191,7 +194,7 @@ with sync_playwright() as p:
     # 3b. Corrections from the independent review of b496eae (DECISION_LOG row 88)
     def same_corrections():
         # mixed units: the gala example compares guests with cookie-dough items
-        ctx, pg, errs = new(); pg.goto(URL); pg.click('[data-action="start-demo"][data-demo="gala"]'); pg.wait_for_timeout(300)
+        ctx, pg, errs = new(); pg.goto(URL); import_fixture(pg, 'gala')
         pg.goto(URL + '#results'); pg.wait_for_timeout(300)
         st = pg.inner_text('.same-turnout')
         check('mixed units: guests vs items is not compared at the same turnout, and says why',

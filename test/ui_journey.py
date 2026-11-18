@@ -4,6 +4,7 @@
 # download a backup, open it again, replace with an example and restore, print. Also checks phone/tablet/desktop widths,
 # dark mode, field help, visible focus, and that the page makes no network requests. All data is fictional.
 import sys, json, pathlib, tempfile
+from plan_fixtures import choose_replacement, import_fixture
 from playwright.sync_api import sync_playwright
 
 page_path = pathlib.Path(__file__).resolve().parent.parent / 'dist' / 'booster-fundraiser-planner.html'
@@ -34,7 +35,8 @@ with sync_playwright() as p:
     # ---- open, understand, start blank ----
     pg.goto(URL)
     home = pg.inner_text('#app')
-    check('home explains where the plan is kept', 'only in this browser, on this device' in home and 'not backed up online' in home)
+    check('home explains that a plan saves to this browser and how to keep a backup',
+          'browser' in home.lower() and 'device' in home.lower() and 'backup' in home.lower(), home)
     pg.click('#app [data-action="start-blank"]'); pg.wait_for_function("location.hash === '#step-event'")
     check('blank plan shows no example banner', not pg.is_visible('#demo-banner'))
     fill(pg, 'eventName', 'Practice plan (fictional)')
@@ -51,22 +53,34 @@ with sync_playwright() as p:
     pg.select_option('[data-path="options.2.kind"]', 'product'); pg.wait_for_timeout(60)
 
     # golf: viable numbers with a written quote, evidence entered below
-    q = {'venueQuote.perParticipant': 40, 'venueQuote.minimumParticipants': 40, 'capacity': 100, 'groupSize': 1, 'deposit.amount': 500, 'cancellationOwed': 800}
+    q = {'venueQuote.flatFee': 0, 'venueQuote.perParticipant': 40, 'venueQuote.minimumParticipants': 40,
+         'venueQuote.minimumSpend': 0, 'capacity': 100, 'groupSize': 1, 'deposit.amount': 500, 'cancellationOwed': 800}
     pg.goto(URL + '#step-quote'); pg.wait_for_timeout(60)
+    check('new quote and capacity amounts start unknown', all(
+        pg.input_value(f'[data-path="options.0.{k}"]') == ''
+        for k in ('venueQuote.flatFee', 'venueQuote.perParticipant', 'venueQuote.minimumParticipants',
+                  'venueQuote.minimumSpend', 'deposit.amount', 'capacity')))
     for k, v in q.items(): fill(pg, f'options.0.{k}', v)
+    pg.locator('[data-path="options.0.deposit.creditedTowardBill"]').select_option('true')
+    pg.locator('[data-path="options.0.deposit.refundable"]').select_option('false')
     help_ok = pg.evaluate("""() => { const i = document.querySelector('[data-path="options.0.venueQuote.minimumParticipants"]');
       const id = i.getAttribute('aria-describedby'); return !!id && /even if fewer come/.test(document.getElementById(id).textContent); }""")
     check('financial fields carry a plain explanation linked to the input', help_ok)
     pg.check('[data-path="options.0.quoteVerified"]'); pg.wait_for_timeout(60)
     # ticketed: free admission with a per-guest charge and a big rental -> not viable
     pg.click('.tab >> nth=1'); pg.wait_for_timeout(40)
-    fill(pg, 'options.1.venueQuote.flatFee', 3000); fill(pg, 'options.1.venueQuote.perParticipant', 12); fill(pg, 'options.1.capacity', 120)
+    dinner_quote = {'venueQuote.flatFee': 3000, 'venueQuote.perParticipant': 12, 'venueQuote.minimumParticipants': 0,
+                    'venueQuote.minimumSpend': 0, 'deposit.amount': 0, 'capacity': 120}
+    for k, v in dinner_quote.items(): fill(pg, f'options.1.{k}', v)
     # product: supplier minimum, no evidence -> not enough evidence
     pg.click('.tab >> nth=2'); pg.wait_for_timeout(40)
     check('product option uses supplier wording', 'Supplier cost per item' in pg.inner_text('#app'))
-    fill(pg, 'options.2.venueQuote.perParticipant', 9); fill(pg, 'options.2.venueQuote.minimumParticipants', 100); fill(pg, 'options.2.capacity', 400)
+    candle_quote = {'venueQuote.flatFee': 0, 'venueQuote.perParticipant': 9, 'venueQuote.minimumParticipants': 100,
+                    'venueQuote.minimumSpend': 0, 'deposit.amount': 0, 'capacity': 400}
+    for k, v in candle_quote.items(): fill(pg, f'options.2.{k}', v)
 
     pg.goto(URL + '#step-prices'); pg.wait_for_timeout(60)
+    check('admission price starts unknown', pg.input_value('[data-path="options.0.price"]') == '')
     fill(pg, 'options.0.price', 100)
     pg.click('.tab >> nth=1'); pg.wait_for_timeout(40); fill(pg, 'options.1.price', 15)
     pg.click('.tab >> nth=2'); pg.wait_for_timeout(40); fill(pg, 'options.2.price', 18)
@@ -93,7 +107,11 @@ with sync_playwright() as p:
     fill(pg, 'options.0.scenarioParticipants.conservative', 40); fill(pg, 'options.0.scenarioParticipants.middle', 50); fill(pg, 'options.0.scenarioParticipants.optimistic', 70)
     pg.click('.tab >> nth=1'); pg.wait_for_timeout(40)
     fill(pg, 'options.1.scenarioParticipants.conservative', 60); fill(pg, 'options.1.scenarioParticipants.middle', 80); fill(pg, 'options.1.scenarioParticipants.optimistic', 100)
+    pg.click('.tab >> nth=2'); pg.wait_for_timeout(40)
+    fill(pg, 'options.2.scenarioParticipants.conservative', 40); fill(pg, 'options.2.scenarioParticipants.middle', 80); fill(pg, 'options.2.scenarioParticipants.optimistic', 120)
     pg.goto(URL + '#step-volunteers'); pg.wait_for_timeout(60)
+    check('volunteer estimates start unknown', all(pg.input_value(f'[data-path="options.{i}.volunteerHours"]') == '' for i in range(3)))
+    for i, hours in enumerate((30, 40, 18)): fill(pg, f'options.{i}.volunteerHours', hours)
     fill(pg, 'volunteerHoursAvailable', 100)
 
     # ---- compare ----
@@ -127,7 +145,7 @@ with sync_playwright() as p:
     check('backup file downloads with a dated name and the full plan', dl.value.suggested_filename.startswith('fundraiser-plan-') and saved['eventName'] == 'Practice plan (fictional)' and len(saved['options']) == 3)
 
     # ---- an example replaces the plan; the plan is kept and can be restored ----
-    pg.click('#save-panel [data-action="load-demo"]'); pg.click('#save-panel [data-action="load-demo"]'); pg.wait_for_timeout(80)
+    import_fixture(pg, 'golf')
     check('example replaced the plan', 'Fictional Example' in pg.evaluate("JSON.parse(localStorage.getItem('bfp-plan-v1')).eventName"))
     check('the replaced plan was kept as a backup', pg.evaluate("JSON.parse(localStorage.getItem('bfp-plan-v1-backup')).eventName") == 'Practice plan (fictional)')
     pg.click('[data-action="toggle-save"]'); pg.wait_for_timeout(60)
@@ -137,7 +155,7 @@ with sync_playwright() as p:
     check('restore keeps the example as the new backup (swap is reversible)', 'Fictional Example' in pg.evaluate("JSON.parse(localStorage.getItem('bfp-plan-v1-backup')).eventName"))
 
     # ---- open the downloaded file: nothing lost ----
-    pg.click('#save-panel [data-action="start-blank"]'); pg.click('#save-panel [data-action="start-blank"]'); pg.wait_for_timeout(80)
+    choose_replacement(pg); pg.wait_for_timeout(80)
     pg.click('[data-action="toggle-save"]'); pg.wait_for_timeout(40)
     pg.set_input_files('input[data-action="import-json"]', path); pg.wait_for_timeout(200)
     check('opening the backup file reports success', 'Plan imported' in pg.inner_text('#status'))
@@ -159,7 +177,7 @@ with sync_playwright() as p:
     check('after printing, sections close again', pg.evaluate("[...document.querySelectorAll('#app details.detail')].filter((d) => d.open).length") <= 1)
 
     # ---- example data prints as fictional ----
-    pg.goto(URL + '#home'); pg.click('[data-demo="golf"]'); pg.click('[data-demo="golf"]'); pg.wait_for_function("location.hash === '#step-event'")
+    import_fixture(pg, 'golf')
     pg.goto(URL + '#results'); pg.wait_for_timeout(80); pg.emulate_media(media='print')
     check('example banner still shows when printed', pg.is_visible('#demo-banner'))
     pg.emulate_media(media='screen')
@@ -178,7 +196,7 @@ with sync_playwright() as p:
     c3 = b.new_context(); p3 = c3.new_page(); p3.goto(URL)
     p3.evaluate("localStorage.setItem('bfp-plan-v1', '{not json')"); p3.reload(); p3.wait_for_timeout(120)
     check('unreadable saved plan: the person is told, not silently shown the example', 'could not be read safely' in p3.inner_text('#status'))
-    p3.click('#app [data-action="start-blank"]'); p3.click('#app [data-action="start-blank"]'); p3.wait_for_timeout(80)
+    p3.click('#app [data-action="start-blank"]'); p3.wait_for_timeout(80)
     p3.fill('[data-path="eventName"]', 'Typed after'); p3.press('[data-path="eventName"]', 'Tab'); p3.wait_for_timeout(80)
     check('unreadable saved plan is kept aside after new typing', p3.evaluate("localStorage.getItem('bfp-plan-v1-unreadable')") == '{not json')
     c3.close()
@@ -191,7 +209,7 @@ with sync_playwright() as p:
     p4.click('#app [data-action="start-blank"]'); p4.wait_for_timeout(60)
     p4.fill('[data-path="eventName"]', 'Real plan'); p4.press('[data-path="eventName"]', 'Tab'); p4.wait_for_timeout(80)
     p4.click('[data-action="toggle-save"]'); p4.wait_for_timeout(40)
-    p4.click('#save-panel [data-action="load-demo"]'); p4.click('#save-panel [data-action="load-demo"]'); p4.wait_for_timeout(80)
+    import_fixture(p4, 'golf')
     practice = pathlib.Path(__file__).resolve().parent.parent / 'docs' / 'practice-plan-fictional.json'
     p4.click('[data-action="toggle-save"]'); p4.wait_for_timeout(40)
     p4.set_input_files('input[data-action="import-json"]', str(practice)); p4.wait_for_timeout(200)
@@ -244,16 +262,17 @@ with sync_playwright() as p:
     c5.close()
 
     # (b) a required backup can't be written, although replacing the plan would succeed: nothing is replaced
-    for action, label in [('start-blank', 'start a blank plan'), ('load-demo', 'load the example'), ('import', 'open a file')]:
+    for action, label in [('start-blank', 'start a blank plan'), ('legacy-import', 'open an older fictional file'), ('import', 'open a real-plan backup')]:
         c6 = b.new_context(); c6.add_init_script(FAULTS); p6 = c6.new_page()
         fresh_plan(p6, 'Fictional valuable plan')
         faults(p6, {'keys': ['bfp-plan-v1-backup', 'bfp-plan-v1-backup-at']})
         open_panel(p6)
-        if action == 'import':
-            practice = pathlib.Path(__file__).resolve().parent.parent / 'docs' / 'practice-plan-fictional.json'
-            p6.set_input_files('input[data-action="import-json"]', str(practice)); p6.wait_for_timeout(200)
+        if action != 'start-blank':
+            backup = ('docs/practice-plan-fictional.json' if action == 'legacy-import'
+                      else 'test/fixtures/golf-control-fictional.json')
+            p6.set_input_files('input[data-action="import-json"]', str(page_path.parent.parent / backup)); p6.wait_for_timeout(200)
         else:
-            p6.click(f'#save-panel [data-action="{action}"]'); p6.click(f'#save-panel [data-action="{action}"]'); p6.wait_for_timeout(120)
+            choose_replacement(p6); p6.wait_for_timeout(120)
         msg = p6.inner_text('#status')
         check(f'backup fails ({label}): the stored plan is not replaced', stored(p6) == 'Fictional valuable plan', str(stored(p6)))
         check(f'backup fails ({label}): the plan stays on screen', p6.evaluate("document.querySelector('[data-path=\"eventName\"]') ? document.querySelector('[data-path=\"eventName\"]').value : document.title") == 'Fictional valuable plan' or 'Fictional valuable plan' in p6.inner_text('#app'), p6.inner_text('#app')[:120])
@@ -261,7 +280,7 @@ with sync_playwright() as p:
         check(f'backup fails ({label}): no message claims a backup was kept', 'kept as a backup' not in msg and 'was kept' not in msg, msg)
         c6.close()
 
-    # (c) "no backup needed" is not reported as a failure: replacing an untouched example needs no backup
+    # (c) "no backup needed" is not reported as a failure: a first visit has no existing plan to back up
     c7 = b.new_context(); c7.add_init_script(FAULTS); p7 = c7.new_page(); p7.goto(URL)
     faults(p7, {'keys': ['bfp-plan-v1-backup', 'bfp-plan-v1-backup-at']})
     p7.click('#app [data-action="start-blank"]'); p7.wait_for_timeout(120)
@@ -271,7 +290,7 @@ with sync_playwright() as p:
     # (d) restore can't write: nothing changes, nothing claims success
     c8 = b.new_context(); c8.add_init_script(FAULTS); p8 = c8.new_page()
     fresh_plan(p8, 'Fictional plan one')
-    open_panel(p8); p8.click('#save-panel [data-action="start-blank"]'); p8.click('#save-panel [data-action="start-blank"]'); p8.wait_for_timeout(100)
+    open_panel(p8); choose_replacement(p8); p8.wait_for_timeout(100)
     p8.fill('[data-path="eventName"]', 'Fictional plan two'); p8.press('[data-path="eventName"]', 'Tab'); p8.wait_for_timeout(80)
     check('control: before the restore test, plan two is saved and plan one is the backup', stored(p8) == 'Fictional plan two' and stored(p8, 'bfp-plan-v1-backup') == 'Fictional plan one')
     faults(p8, {'all': True})
@@ -291,7 +310,7 @@ with sync_playwright() as p:
     p9.reload(); p9.wait_for_timeout(120)
     note = p9.inner_text('#status')
     check('unreadable plan, aside-copy fails: the note does not claim it was kept aside', 'kept aside in this browser, not deleted' not in note, note)
-    p9.click('#app [data-action="start-blank"]'); p9.click('#app [data-action="start-blank"]'); p9.wait_for_timeout(100)
+    p9.click('#app [data-action="start-blank"]'); p9.wait_for_timeout(100)
     p9.fill('[data-path="eventName"]', 'Typed after'); p9.press('[data-path="eventName"]', 'Tab'); p9.wait_for_timeout(80)
     check('unreadable plan, aside-copy fails: the unreadable saved copy is not overwritten', p9.evaluate("localStorage.getItem('bfp-plan-v1')") == '{not json')
     check('unreadable plan, aside-copy fails: new typing shows the unsaved warning', 'not saved' in warning(p9).lower(), warning(p9))
@@ -330,7 +349,7 @@ with sync_playwright() as p:
     # ---- widths and dark mode: no sideways scrolling on any page ----
     for w, scheme in [(375, 'light'), (768, 'dark'), (1280, 'dark')]:
         c2 = b.new_context(viewport={'width': w, 'height': 900}, color_scheme=scheme); p2 = c2.new_page()
-        p2.goto(URL); p2.click('[data-demo="gala"]'); p2.wait_for_function("location.hash === '#step-event'")
+        p2.goto(URL); import_fixture(p2, 'gala')
         bad = [h for h in ['#home', '#guide', '#step-quote', '#step-sponsors', '#step-evidence', '#step-scenarios', '#results'] if not (p2.goto(URL + h) or p2.wait_for_timeout(60) or no_hscroll(p2))]
         check(f'{w}px {scheme}: no sideways scrolling', not bad, ', '.join(bad))
         if w != 1280 or scheme == 'dark':

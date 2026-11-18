@@ -3,6 +3,7 @@
 # Real clicks and keyboard input, each section in a fresh browser context (separate storage), fictional data only.
 # A section that throws is recorded as a failure, so this file also reports cleanly against an older build.
 import sys, json, pathlib
+from plan_fixtures import import_fixture
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -17,13 +18,19 @@ def section(name, fn):
     try: fn()
     except Exception as e: results.append((f'{name}: section ran to the end', False, f'{type(e).__name__}: {str(e).splitlines()[0][:200]}'))
 def P(p): return f'[data-path="{p}"]'
+def research_summary(pg, heading):
+    return pg.locator('.research .rsum').filter(
+        has=pg.get_by_role('heading', name=heading, exact=True)
+    ).inner_text()
 def fill(pg, sel, v):
     pg.fill(sel, str(v), timeout=5000); pg.press(sel, 'Tab'); pg.wait_for_timeout(100)
 def stored(pg): return json.loads(pg.evaluate("localStorage.getItem('bfp-plan-v1')") or 'null')
 def open_file(pg, text):
     if not pg.is_visible('#save-panel'): pg.click('[data-action="toggle-save"]')
     pg.set_input_files('input[data-action="import-json"]', files=[{'name': 'p.json', 'mimeType': 'application/json', 'buffer': text.encode()}])
-    pg.wait_for_timeout(300); st = pg.inner_text('#status'); pg.click('[data-action="toggle-save"]'); return st
+    pg.wait_for_timeout(300); st = pg.inner_text('#status')
+    if pg.is_visible('#save-panel'): pg.click('header [data-action="toggle-save"]')
+    return st
 def memo(pg):
     pg.evaluate("""() => { window.__copied = null;
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: (t) => { window.__copied = t; return Promise.resolve(); } } });
@@ -90,7 +97,7 @@ with sync_playwright() as p:
         ids = [x['id'] for x in stored(pg)['research']['audiences']]
         pg.check(f'[data-research-toggle="research.audiences.2.overlapsWith"][value="{ids[0]}"]'); pg.wait_for_timeout(150)
         check('overlap is saved by ticking a box', stored(pg)['research']['audiences'][2]['overlapsWith'] == [ids[0]])
-        tot = pg.inner_text('.research .rsum')
+        tot = research_summary(pg, 'Totals by counting unit')
         check('totals are per unit: 160 people and 200 households, never 360', 'people: 160 estimated reach' in tot and 'households: 200 estimated reach' in tot and '360' not in pg.inner_text('#app'), tot)
         check('overlapping people are not called unique', 'not unique people: some groups overlap' in tot, tot)
         check('different units are never added together (said on screen)', 'Different units are never added together' in tot)
@@ -101,14 +108,14 @@ with sync_playwright() as p:
         pg.select_option(P('research.comparables.0.comparability'), 'close'); pg.wait_for_timeout(120)
         c0 = stored(pg)['research']['comparables'][0]
         check('a new similar event starts as a sourced observation that is NOT checked', c0['provenance'] == 'observation' and c0['verification'] == 'unchecked', c0)
-        cmp_ = pg.inner_text('.research .rsum >> nth=1')
+        cmp_ = research_summary(pg, 'Similar events side by side')
         check('fees left blank are shown as unknown, never $0', 'Required fees unknown for 1 of 1' in cmp_ and '$0 per person' not in cmp_, cmp_)
         fill(pg, P('research.comparables.0.feesPerPerson'), 0)
         pg.click('[data-action="add-research"][data-kind="comparables"]'); pg.wait_for_timeout(150)
         fill(pg, P('research.comparables.1.name'), 'PTA golf day (fictional)')
         fill(pg, P('research.comparables.1.priceSingle'), 120); fill(pg, P('research.comparables.1.feesPerPerson'), 5)
         pg.select_option(P('research.comparables.1.comparability'), 'close'); pg.wait_for_timeout(120)
-        cmp_ = pg.inner_text('.research .rsum >> nth=1')
+        cmp_ = research_summary(pg, 'Similar events side by side')
         check('similar events are listed side by side, each with its own price and fees', '$140 per person (advertised)' in cmp_ and '$120 per person (advertised)' in cmp_ and '$5 per person' in cmp_, cmp_)
         check('no combined price range is shown, even for two close, fee-known events', '$120–$140' not in cmp_ and '$125–$140' not in cmp_ and 'no combined price range' in cmp_.lower(), cmp_)
         check('both events say they are not checked until the organizer checks them', cmp_.count('Not checked against the source') == 2, cmp_)
@@ -212,7 +219,7 @@ with sync_playwright() as p:
             st = open_file(pg, json.dumps(d))
             check(f'malformed research ({name}) is refused and changes nothing', 'Could not import' in st and stored(pg) == good, st)
         # restore after replacing with the example
-        pg.click('[data-action="toggle-save"]'); pg.click('[data-action="load-demo"]'); pg.click('[data-action="load-demo"]'); pg.wait_for_timeout(250)
+        import_fixture(pg, 'golf')
         pg.click('[data-action="toggle-save"]'); pg.click('[data-action="restore-backup"]'); pg.click('[data-action="restore-backup"]'); pg.wait_for_timeout(250)
         check('restore previous plan brings the research back exactly', stored(pg) == good, pg.inner_text('#status'))
         # a deleted option leaves visible broken links
@@ -291,7 +298,7 @@ with sync_playwright() as p:
         check('analogues: real-plan file opens (no example banner)', 'Plan imported' in st and not pg.is_visible('#demo-banner'), st)
         before = money_view(pg)
         show(pg, 'research')
-        t = pg.inner_text('.research .rsum >> nth=1')
+        t = research_summary(pg, 'Similar events side by side')
         rows = {r.get_attribute('data-obs'): r.inner_text() for r in pg.query_selector_all('tr[data-obs]')}
         check('a partly comparable event is worded properly', 'Partly comparable' in rows.get('c_duo', ''), rows.get('c_duo'))
         check('mixed real/fictional: the fictional $10 record is not in the real list and no $10-$150 range appears', 'c_fic' not in rows and '$10–$150' not in t and 'Fictional, not compared: FICTIONAL ten-dollar demo' in t, t[:400])
@@ -304,7 +311,7 @@ with sync_playwright() as p:
         check('advertised capacity is a limit, not attendance', 'capacity 144 (a limit, not attendance)' in rows.get('c_future', ''), rows.get('c_future'))
         check('historical participation is not paid registrations', 'reported participation 90 (not paid registrations)' in rows.get('c_2022', ''), rows.get('c_2022'))
         check('celebrity package: not comparable, no individual price invented', 'Not comparable' in rows.get('c_celebrity', '') and 'individual price not recorded' in rows.get('c_celebrity', ''), rows.get('c_celebrity'))
-        tot = pg.inner_text('.research .rsum >> nth=0')
+        tot = research_summary(pg, 'Totals by counting unit')
         check('audience totals leave the fictional group out and show what kind of records they are', 'people: 180 estimated reach' in tot and '9,999' not in tot and '1 fictional group is left out' in tot and '1 sourced, 1 estimate, 1 not checked' in tot, tot)
         after = money_view(pg)
         check('analogues: every calculated figure on the results page is unchanged by research', all(before[k] == after[k] for k in ('cards', 'status', 'detail', 'whatif')))

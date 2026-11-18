@@ -1,5 +1,6 @@
 # Browser smoke test for the built site. Usage: python3 test/ui_smoke.py [screenshot_dir]
 import sys, pathlib
+from plan_fixtures import choose_replacement, import_fixture
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
 
 page_path = pathlib.Path(__file__).resolve().parent.parent / 'dist' / 'booster-fundraiser-planner.html'
@@ -33,10 +34,12 @@ with sync_playwright() as p:
     for w, label in [(1280, 'desktop'), (375, 'mobile')]:
         pg = b.new_context(viewport={'width': w, 'height': 900}).new_page(); watch(pg)
         pg.goto(URL)
-        assert pg.is_visible('text=Try a golf example'), 'home page CTA missing'
+        assert pg.is_visible('#app [data-action="start-blank"]'), 'home page must offer a real plan'
+        assert not pg.locator('[data-demo], [data-action="load-demo"]').count(), 'home or backup panel still offers examples'
+        assert pg.evaluate("localStorage.getItem('bfp-plan-v1')") is None, 'visiting should save nothing'
         no_hscroll(pg, f'{label} home'); shot(pg, f'{label}-home')
         assert not pg.is_visible('#demo-banner'), 'no example banner on the home page'
-        pg.click('text=Try a golf example')
+        import_fixture(pg, 'golf'); pg.goto(URL + '#step-event')
         pg.wait_for_function("location.hash === '#step-event'", timeout=3000)
         # The page redraws (and shows the banner) just after the address changes, so wait for it rather than
         # checking instantly. Still fails if the banner hasn't appeared within 3 seconds.
@@ -56,14 +59,67 @@ with sync_playwright() as p:
                     assert f'Option {n + 2} of 3' in pg.text_content('.stepcard .eyebrow')
                     assert pg.evaluate('location.hash') == f'#step-{sid}'
             pg.click('.stepnav .btn:not(.ghost)')
-        pg.wait_for_function("location.hash === '#results'", timeout=3000); pg.wait_for_timeout(50)
-        assert 'Not enough evidence to decide yet' in pg.inner_text('#app')
+        pg.wait_for_url('**#decision', timeout=3000)
+        pg.wait_for_selector('.club-brief', state='visible', timeout=3000)
+        assert 'Not enough evidence to decide yet' in pg.inner_text('.club-brief')
         no_hscroll(pg, f'{label} results'); shot(pg, f'{label}-results')
         pg.go_back(); pg.wait_for_function("location.hash === '#step-volunteers'", timeout=3000)
         pg.close()
 
+    # A bookmark to results must never show a fabricated plan. Starting an auction
+    # from that view saves the chosen format, and Home resumes the last wizard step.
+    first = b.new_context().new_page(); watch(first)
+    first.goto(URL + '#decision')
+    first.locator('#new-plan-kind').wait_for()
+    assert first.evaluate("localStorage.getItem('bfp-plan-v1')") is None
+    assert not first.locator('.club-brief').count()
+    first.select_option('#new-plan-kind', 'auction')
+    first.click('#app [data-action="start-blank"]')
+    first.wait_for_url('**#step-event')
+    first.goto(URL + '#step-options')
+    assert first.input_value('[data-path="options.0.kind"]') == 'auction'
+    first.goto(URL + '#step-prices')
+    first.locator('[data-path="options.0.price"]').wait_for()
+    first.goto(URL + '#home'); first.reload()
+    first.get_by_text('Continue my plan', exact=True).click()
+    first.wait_for_url('**#step-prices')
+    assert not first.is_visible('#demo-banner')
+    first.context.close()
+
+    # The short board brief must retain its estimates across refresh and into copy and print.
+    auction_ctx = b.new_context(viewport={'width': 375, 'height': 850})
+    auction_page = auction_ctx.new_page(); watch(auction_page)
+    auction_page.goto(URL)
+    import_fixture(auction_page, 'auction')
+    auction_page.locator('header [href="#decision"]').click()
+    brief = auction_page.locator('.club-brief')
+    brief.wait_for(state='visible')
+    assert auction_page.url.endswith('#decision') and auction_page.is_visible('#demo-banner')
+    for amount in ('−$180', '$1,200', '$2,440'):
+        assert amount in brief.inner_text(), f'auction case missing from decision brief: {amount}'
+    no_hscroll(auction_page, 'auction decision brief on phone')
+    auction_page.reload()
+    brief.wait_for(state='visible')
+    auction_page.evaluate('''() => {
+        const record = text => { window.__briefCopy = text; return Promise.resolve(); };
+        Object.defineProperty(navigator, 'clipboard', {configurable:true, value:{writeText:record}});
+        document.execCommand = () => { record(document.activeElement.value); return true; };
+    }''')
+    auction_page.click('[data-action="copy-brief"]')
+    auction_page.wait_for_function("window.__briefCopy && window.__briefCopy.includes('$1,200')")
+    copied = auction_page.evaluate('window.__briefCopy')
+    assert 'fictional' in copied.lower() and '−$180' in copied and '$2,440' in copied
+    auction_page.emulate_media(media='print')
+    assert brief.is_visible() and auction_page.is_visible('#demo-banner')
+    assert '$1,200' in brief.inner_text() and not auction_page.is_visible('[data-action="copy-brief"]')
+    auction_page.emulate_media(media='screen')
+    auction_page.get_by_role('link', name='Full analysis').click()
+    auction_page.wait_for_selector('[data-action="copy-memo"]')
+    assert '$2,300 to hit the $2,000 goal' in auction_page.locator('.auction-targets').inner_text()
+    auction_ctx.close()
+
     pg = b.new_context(viewport={'width': 1280, 'height': 900}).new_page(); watch(pg)
-    pg.goto(URL); pg.click('text=Try a golf example')
+    pg.goto(URL); import_fixture(pg, 'golf'); pg.goto(URL + '#step-event')
     # survey uses one price per option from the prices step
     pg.goto(URL + '#step-survey')
     survey = pg.inner_text('#survey')
@@ -81,12 +137,20 @@ with sync_playwright() as p:
     pg.goto(URL + '#results')
     assert 'What to tell the board' in pg.inner_text('#app')
     # second example: gala with auction vs. product sale uses each type's own words
-    pg.goto(URL + '#home'); pg.click('[data-demo="gala"]'); pg.click('[data-demo="gala"]')
+    import_fixture(pg, 'gala'); pg.goto(URL + '#step-event')
     pg.wait_for_function("location.hash === '#step-event'", timeout=3000)
     pg.goto(URL + '#step-quote'); pg.click('.tab >> nth=1'); pg.wait_for_timeout(50)
     assert 'Supplier cost per item' in pg.inner_text('#app'), 'product sale should use supplier wording'
     pg.goto(URL + '#step-scenarios'); pg.wait_for_timeout(50)
     assert 'Auction and raffle money' in pg.inner_text('#app'), 'auction option should ask for auction money per scenario'
+    auction_targets = pg.locator('.auction-targets')
+    auction_targets.get_by_text('Likely · 120 guests', exact=False).wait_for()
+    assert '$3,954 to hit the $6,000 goal. Your estimate is $3,000.' in auction_targets.inner_text()
+    bid_box = pg.locator('input[data-path="options.0.scenarioProceeds.middle"]')
+    bid_box.fill(''); bid_box.press('Tab')
+    auction_targets.get_by_text('Likely · 120 guests', exact=False).filter(has_text='Bid estimate missing.').wait_for()
+    bid_box.fill('3000'); bid_box.press('Tab')
+    auction_targets.get_by_text('Likely · 120 guests', exact=False).filter(has_text='Your estimate is $3,000.').wait_for()
     pg.goto(URL + '#step-survey'); pg.wait_for_timeout(50)
     gs = pg.text_content('#survey')
     assert 'per item, would your household buy' in gs and '( ) Yes, 2 items' in gs and 'full table of 8' in gs and 'foursome' not in gs.lower(), 'survey should fit gala and product sale'
@@ -94,11 +158,10 @@ with sync_playwright() as p:
     pg.goto(URL + '#results'); pg.wait_for_timeout(50)
     rt = pg.inner_text('#app')
     assert 'items sold to break even' in rt and 'leaves out auction and raffle money' in rt and 'no auction bids' in rt
-    # back to the golf example for the remaining checks
-    pg.goto(URL + '#home'); pg.click('[data-demo="golf"]'); pg.click('[data-demo="golf"]')
-    pg.wait_for_function("location.hash === '#step-event'", timeout=3000)
+    assert pg.locator('.auction-targets').count() == 1, 'only the auction should show bid targets'
+    assert '$3,954 to hit the $6,000 goal' in pg.locator('.auction-targets').text_content()
     # ---- audit fixes, end to end ----
-    pg.goto(URL + '#home'); pg.click('[data-demo="golf"]'); pg.click('[data-demo="golf"]')
+    import_fixture(pg, 'golf'); pg.goto(URL + '#step-event')
     pg.wait_for_function("location.hash === '#step-event'", timeout=3000)
     # F2: survey answers are tied to the offer; a price change makes them stale until confirmed
     pg.goto(URL + '#step-evidence'); pg.wait_for_timeout(60)
@@ -138,7 +201,7 @@ with sync_playwright() as p:
     assert 'Plan imported' in pg.inner_text('#status'), 'a real export should import'
     assert pg.evaluate("!!localStorage.getItem('bfp-plan-v1-backup')"), 'previous plan kept as backup'
     pg.click('[data-action="toggle-save"]')
-    pg.goto(URL + '#home'); pg.click('[data-demo="golf"]'); pg.click('[data-demo="golf"]')
+    import_fixture(pg, 'golf'); pg.goto(URL + '#step-event')
     pg.wait_for_function("location.hash === '#step-event'", timeout=3000)
     # editing recomputes: shotgun price below cost -> not viable
     pg.goto(URL + '#step-prices'); pg.click('.tab >> nth=1')
@@ -151,14 +214,16 @@ with sync_playwright() as p:
     pg.click('[data-action="fill-evidence"]')
     assert pg.input_value('input[data-path="options.0.scenarioParticipants.conservative"]') == '0'
     assert pg.input_value('input[data-path="options.0.scenarioParticipants.middle"]') == '6'
-    # autosave survives reload; home offers "Continue my plan"
+    # Older fictional data stays accessible without displacing the main real-plan action.
     pg.reload(); pg.goto(URL + '#home')
-    assert pg.is_visible('text=Continue my plan'), 'saved plan not detected'
+    assert pg.is_visible('#app [data-action="start-blank"]')
+    pg.get_by_text('Earlier saved plan', exact=True).click()
+    assert pg.is_visible('text=Continue earlier plan'), 'older saved plan not detected'
     # export shows JSON text
     pg.click('[data-action="toggle-save"]'); pg.click('[data-action="export"]')
     assert '"options"' in pg.input_value('#export-text')
     # start over needs a second click, then shows a blank plan
-    pg.click('#save-panel [data-action="start-blank"]'); pg.click('#save-panel [data-action="start-blank"]')
+    choose_replacement(pg)
     pg.wait_for_function("location.hash === '#step-event'", timeout=3000)
     banner_within(pg, 'hidden', 'example banner must disappear for a blank plan')
     b.close()

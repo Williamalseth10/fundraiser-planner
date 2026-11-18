@@ -50,6 +50,14 @@ jobs:
         run: python test/ui_option_delete.py
       - name: Ready to commit? (criteria, evidence, next steps)
         run: python test/ui_ready.py
+      - name: Fundraiser ideas and board decisions
+        run: python test/ui_event_decisions.py
+      - name: Golf comparison amounts on screen, in the copy and in print
+        run: python test/ui_board_decision_basis.py
+      - name: Board sponsorship and auction questions
+        run: python test/ui_board_questions.py
+      - name: Pre-decision forecasts, final accounts and carry-forward
+        run: python test/ui_forecast_accuracy.py
       - name: Volunteer journey
         run: |
           mkdir -p browser-evidence

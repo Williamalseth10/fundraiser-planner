@@ -4,14 +4,15 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const E = require('../src/engine.js');
+const { DEMO_STATE } = require('./fixtures/plans.js');
 function app() {
   const context = vm.createContext({ window: { BFEngine: E }, console });
-  vm.runInContext(fs.readFileSync('src/demo-data.js', 'utf8'), context);
+  vm.runInContext(fs.readFileSync('src/blank-plan.js', 'utf8'), context);
   let src = fs.readFileSync(process.env.APP_SOURCE || 'src/app.js', 'utf8');
   src = src.slice(0, src.indexOf("  document.addEventListener('change', onChange);"));
   src += '\n window.testUI={validatePlan};})();';
   vm.runInContext(src, context);
-  return { ui: context.window.testUI, demo: JSON.parse(JSON.stringify(context.window.BFDemo.DEMO_STATE)) };
+  return { ui: context.window.testUI, demo: JSON.parse(JSON.stringify(DEMO_STATE)) };
 }
 test('a plan whose deleted option left survey, payment and offer entries is still valid, and those entries count for nothing', () => {
   const { ui, demo } = app();

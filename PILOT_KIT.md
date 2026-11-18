@@ -44,7 +44,7 @@ Proceed if the answers to 1 and 3 are yes and the decision is still open.
 - Grok suggested also stopping if organizers "would not revisit" the tool. Since the event happens once a year, a low revisit rate is expected and isn't a stop signal by itself.
 
 ## Scope of the first pilot
-Golf quote only. The gala-vs-product-sale button is a made-up demo, not part of the session. A product-sale test comes later, and only with a group holding a written supplier sheet that is about to commit to a minimum order.
+In the first session, use the club’s golf quote. For a later product-sale session, recruit a group holding a written supplier sheet that is about to commit to a minimum order.
 
 ## Counting rules (added from Grok's review)
 - A session counts only if the before/after record was filled in **before** they saw results, the quote was **theirs**, and the facilitator supplied **no numbers**.

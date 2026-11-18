@@ -1,4 +1,4 @@
-// Inlines the engine, demo data and UI into one self-contained HTML file: dist/booster-fundraiser-planner.html
+// Inlines the engine, blank plan and UI into one self-contained HTML file: dist/booster-fundraiser-planner.html
 const fs = require('fs');
 const path = require('path');
 const root = path.join(__dirname, '..');
@@ -6,7 +6,13 @@ const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 const safe = (js) => js.replace(/<\/script/gi, '<\\/script');
 const html = read('src/index.src.html')
   .replace('/*__ENGINE__*/', () => safe(read('src/engine.js')))
-  .replace('/*__DEMO__*/', () => safe(read('src/demo-data.js')))
+  .replace('/*__BLANK_PLAN__*/', () => safe(read('src/blank-plan.js')))
+  .replace('/*__CLUB_HISTORY__*/', () => safe(read('src/club-history.js')))
+  .replace('/*__ACCURACY__*/', () => safe(read('src/accuracy.js')))
+  .replace('/*__BOARD_QUESTIONS__*/', () => safe(read('src/board-questions.js')))
+  .replace('/*__CLUB_RECOMMENDATION__*/', () => safe(read('src/club-recommendation.js')))
+  .replace('/*__EVENT_IDEAS__*/', () => safe(read('src/event-ideas.js')))
+  .replace('/*__EVENT_IDEAS_UI__*/', () => safe(read('src/event-ideas-ui.js')))
   .replace('/*__APP__*/', () => safe(read('src/app.js')));
 fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
 fs.writeFileSync(path.join(root, 'dist/booster-fundraiser-planner.html'), html);

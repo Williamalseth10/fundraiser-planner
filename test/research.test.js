@@ -5,7 +5,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const E = require('../src/engine.js');
-const D = require('../src/demo-data.js');
+const D = require('./fixtures/plans.js');
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const example = () => clone(require('../docs/research-example-fictional.json'));
 

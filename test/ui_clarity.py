@@ -8,8 +8,8 @@ with sync_playwright() as p:
     page.goto(url)
     home = page.locator('main').inner_text()
     assert 'worst case' not in home.lower(), 'Home must not promise a maximum loss'
-    assert 'loss scenarios' in home
-    page.get_by_role('link', name='How to use', exact=True).first.click()
+    assert 'what it could lose' in home.lower()
+    page.locator('header a[href="#guide"]').click()
     expect(page.locator('main')).to_contain_text('website and downloaded HTML file keep separate saved plans')
     guide = page.locator('main').inner_text()
     assert 'website and downloaded HTML file keep separate saved plans' in guide
