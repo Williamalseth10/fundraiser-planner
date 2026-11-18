@@ -2,6 +2,7 @@
 # Run after `node scripts/build.js`:   python3 test/ui_option_delete.py
 # Fresh browser context, fictional example data, real clicks.
 import sys, json, pathlib
+from plan_fixtures import import_fixture
 from playwright.sync_api import sync_playwright
 
 URL = (pathlib.Path(__file__).resolve().parent.parent / 'dist' / 'booster-fundraiser-planner.html').as_uri()
@@ -12,7 +13,7 @@ with sync_playwright() as p:
     b = p.chromium.launch(); pg = b.new_context().new_page(); errs = []
     pg.on('pageerror', lambda e: errs.append(str(e)))
     pg.goto(URL)
-    pg.click('#app [data-action="start-demo"][data-demo="golf"]'); pg.wait_for_timeout(300)
+    import_fixture(pg, 'golf')
     pg.goto(URL + '#step-event'); pg.fill('[data-path="eventName"]', 'Edited example (fictional)'); pg.press('[data-path="eventName"]', 'Tab'); pg.wait_for_timeout(150)
     pg.goto(URL + '#step-sponsors'); pg.wait_for_timeout(150)
     pg.select_option('[data-path="sponsorships.0.optionId"]', 'alt'); pg.wait_for_timeout(150)   # a sponsor tied only to the option we delete

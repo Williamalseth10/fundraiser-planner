@@ -3,6 +3,7 @@
 # Real clicks and keys; each section in a fresh browser context (separate storage); fictional data only.
 # A section that throws is recorded as a failure, so this also reports cleanly against an older build.
 import sys, json, re, pathlib
+from plan_fixtures import import_fixture
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -20,7 +21,9 @@ def stored(pg): return json.loads(pg.evaluate("localStorage.getItem('bfp-plan-v1
 def open_file(pg, text):
     if not pg.is_visible('#save-panel'): pg.click('[data-action="toggle-save"]')
     pg.set_input_files('input[data-action="import-json"]', files=[{'name': 'p.json', 'mimeType': 'application/json', 'buffer': text.encode()}])
-    pg.wait_for_timeout(300); st = pg.inner_text('#status'); pg.click('[data-action="toggle-save"]'); return st
+    pg.wait_for_timeout(300); st = pg.inner_text('#status')
+    if pg.is_visible('#save-panel'): pg.click('header [data-action="toggle-save"]')
+    return st
 def memo(pg):
     pg.evaluate("""() => { window.__copied = null;
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: (t) => { window.__copied = t; return Promise.resolve(); } } });
@@ -144,7 +147,7 @@ with sync_playwright() as p:
 
     # 4. Product items vs event participants
     def units():
-        ctx, pg, errs = new(); pg.goto(URL); pg.click('[data-action="start-demo"][data-demo="gala"]'); pg.wait_for_timeout(300); results_page(pg)
+        ctx, pg, errs = new(); pg.goto(URL); import_fixture(pg, 'gala'); results_page(pg)
         g, dgh = card(pg, 'gala'), card(pg, 'dough')
         check('event option counts guests', 'likely number of' in g and 'guests' in g[:600], g[:600])
         check('product option counts items, and paid means items paid for', 'items' in dgh[:600] and 'items paid for' in dgh and 'guests' not in dgh, dgh[:800])

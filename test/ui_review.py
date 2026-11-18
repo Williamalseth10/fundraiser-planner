@@ -2,6 +2,7 @@
 #   python3 test/ui_review.py
 # Uses only synthetic data. The script-injection check sets a harmless local flag; nothing leaves the page.
 import sys, json, pathlib
+from plan_fixtures import import_fixture
 from playwright.sync_api import sync_playwright
 
 page_path = pathlib.Path(__file__).resolve().parent.parent / 'dist' / 'booster-fundraiser-planner.html'
@@ -36,7 +37,7 @@ def plan(**over):
 def fresh(b, width=1200):
     pg = b.new_context(viewport={'width': width, 'height': 900}).new_page()
     errs = []; pg.on('pageerror', lambda e: errs.append(str(e)))
-    pg.goto(URL); pg.click('[data-demo="golf"]'); pg.wait_for_function("location.hash === '#step-event'")
+    pg.goto(URL); import_fixture(pg, 'golf')
     return pg, errs
 
 def import_plan(pg, text):

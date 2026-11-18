@@ -6,7 +6,7 @@ Volunteers enter real quotes, costs, sponsor commitments, money actually receive
 
 **Volunteers: start with [`docs/START_HERE.md`](docs/START_HERE.md)**, or open the planner and choose **How to use**.
 
-The two built-in examples (a golf outing; a gala vs. a cookie dough sale) are **fictional**. Every number in them is made up.
+On Home, choose a fundraiser or use **Help me choose a fundraiser** to shortlist formats from the resources the club already has. Returning organizers can continue their saved work. **Results** opens the decision brief with low, likely and high net, the evidence behind turnout and the board’s limits. **Full analysis** opens the underlying figures. The board can compare options against risk and staffing limits, check comparable club records and save a pre-decision estimate to score against the final accounts.
 
 ## Use it
 Open `index.html` (or `dist/booster-fundraiser-planner.html` after a build) in any modern browser. It is a single file: no install, no account, no server, no tracking, and it makes no network requests. Plans save in that browser only. Use **Save & backup → Download backup file** to keep a copy.
@@ -14,11 +14,16 @@ Open `index.html` (or `dist/booster-fundraiser-planner.html` after a build) in a
 ## How the code is organized
 | Path | What it is | Edit rules |
 |---|---|---|
-| `src/engine.js` | All the money math. Pure functions, integer cents, no screen code. | Every change needs a test in `test/*.test.js`. |
+| `src/engine.js` | Current event pricing, costs, risk and scenario calculations in integer cents. | Every change needs a test in `test/*.test.js`. |
+| `src/event-ideas.js`, `src/event-ideas-ui.js` | Suggested formats and first research steps from the club’s resource choices. | Produce an empty option when the organizer chooses a format. |
+| `src/club-recommendation.js` | Board shortlist from modeled options, spending limits and current evidence. | Preserve incomplete comparisons and ties. |
+| `src/board-questions.js` | Golf sponsorship gaps and loss of a donated auction lot. | Use the decision’s actual paid or likely basis and show the assumptions. |
+| `src/club-history.js`, `src/accuracy.js` | Golf checkpoints, auction comparables and prospective forecast scoring. | Keep historical research separate from the current financial projection. |
 | `src/app.js` | The website: home, 10-step wizard, results, "How to use" guide, saving, backups, import, print. | Escape everything shown on the page with `esc()`. Validate anything loaded (`validatePlan`). |
 | `src/index.src.html` | Page skeleton and all CSS (light, dark, print). | System fonts only, no external requests. |
-| `src/demo-data.js` | The fictional examples and the blank plan. | Keep examples labeled as made up. |
-| `scripts/build.js` | Inlines the three scripts into one HTML file. | |
+| `src/blank-plan.js` | The empty plan used for new fundraisers. | Keep turnout unknown until the organizer enters it. |
+| `test/fixtures/plans.js` | Fictional plans used by the test suites. | Included only in the development source. |
+| `scripts/build.js` | Inlines the app and its modules into one HTML file. | |
 | `index.html`, `dist/` | **Generated.** Never edit by hand; run the build. | |
 | `test/` | Engine tests (Node) and browser tests (Python + Playwright). | |
 | `docs/START_HERE.md` | The volunteer guide and checklist (mirrors the in-app guide). | |
@@ -34,7 +39,7 @@ Requirements: Node 18+ (tested with 22). Browser tests also need Python 3 and Pl
 ```
 node --test test/*.test.js     # engine tests (must pass)
 node scripts/build.js          # regenerates index.html and dist/
-python3 test/ui_smoke.py       # browser: every step, phone width, examples
+python3 test/ui_smoke.py       # browser: first use, every step, phone width
 python3 test/ui_review.py      # browser: import safety, injected markup, keyboard access
 python3 test/ui_clarity.py     # browser: first-use wording, product-sale grouping correction
 python3 test/ui_whatif.py      # browser: what would need to change, applying a price, contract dates, time zones, phone tables
@@ -42,11 +47,14 @@ python3 test/ui_research.py    # browser: research records, provenance, side-by-
 python3 test/ui_scenarios.py   # browser: evidence stages, past rounds, scenario reasons, capacity shortcuts, same-turnout comparison
 python3 test/ui_option_delete.py # browser: removing an option keeps the plan readable after a reload
 python3 test/ui_ready.py        # browser: "Ready to commit?" criteria, evidence, next steps, board summary and print
+python3 test/ui_event_decisions.py # browser: fundraiser selection and board decisions
+python3 test/ui_board_questions.py # browser: golf cost gap, auction loss, mobile, board copy and print
+python3 test/ui_forecast_accuracy.py # browser: prospective capture, actuals, closeout, carry-forward
 python3 test/ui_journey.py     # browser: full session, reload, backup file, restore, print, widths, dark mode
 ```
 Optional: pass a folder to `ui_smoke.py` or `ui_journey.py` to save screenshots (and a print PDF from the journey).
 
-CI (`.github/workflows/ci.yml`) runs the engine tests, the build and an `index.html` freshness check on every push and pull request, plus a `browser` job that runs the three browser tests on GitHub's standard free runner.
+CI (`.github/workflows/ci.yml`) runs the engine tests, the build and an `index.html` freshness check on every push and pull request, plus a `browser` job that runs the browser suites on GitHub's standard free runner.
 
 ## Financial rules (summary; details and reasons in `DECISION_LOG.md`)
 - **Integer cents** throughout the engine. Negative or non-numeric money inputs count as 0.
@@ -61,7 +69,7 @@ CI (`.github/workflows/ci.yml`) runs the engine tests, the build and an `index.h
 
 ## Saved plans and safety
 - Saved in the browser's local storage only. It is not a cloud backup and doesn't sync between devices.
-- An example, a blank plan or an opened file first keeps the current plan as a backup; if a real plan can't be backed up, nothing is replaced. "Restore previous plan" swaps them back, only if both writes succeed.
+- Starting a new plan or opening a backup first preserves the current saved plan. If the browser cannot keep a required backup, replacement stops. "Restore previous plan" swaps the two when both writes succeed.
 - A failed save shows a red "Not saved" warning on every page, with Download backup file and Show plan as text (both hold the latest edits), until a save works again.
 - Opened files are type-checked and dry-run before anything is replaced. A failed import changes nothing, neither the plan on screen nor the saved copy.
 - A saved plan that fails the check at startup is kept aside (`bfp-plan-v1-unreadable`). If that copy can't be made, the app won't write over it and says changes aren't being saved.

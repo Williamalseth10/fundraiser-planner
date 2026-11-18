@@ -1,0 +1,185 @@
+{
+  "schemaVersion": 1,
+  "isDemo": false,
+  "eventName": "Fictional golf offers for board review",
+  "settings": {
+    "fundraisingTarget": 5000,
+    "volunteerHourValue": null
+  },
+  "snapshot": {
+    "format": "Shotgun golf scramble, foursomes (fictional)",
+    "dateWindow": "a Saturday in May (fictional)",
+    "locationArea": "[fictional course area]",
+    "included": "golf, cart, lunch, player gift",
+    "beneficiary": "team equipment (fictional)",
+    "fallbackPrice": ""
+  },
+  "volunteerHoursAvailable": 120,
+  "scenarioSettings": {
+    "conservative": {
+      "label": "Conservative",
+      "statuses": [
+        "collected"
+      ],
+      "extraRevenuePerParticipant": 0,
+      "otherRevenue": 0,
+      "costContingencyPct": 10
+    },
+    "middle": {
+      "label": "Middle",
+      "statuses": [
+        "collected",
+        "committed"
+      ],
+      "extraRevenuePerParticipant": 0,
+      "otherRevenue": 0,
+      "costContingencyPct": 0
+    },
+    "optimistic": {
+      "label": "Optimistic",
+      "statuses": [
+        "collected",
+        "committed",
+        "hoped"
+      ],
+      "extraRevenuePerParticipant": 0,
+      "otherRevenue": 0,
+      "costContingencyPct": 0
+    }
+  },
+  "options": [
+    {
+      "id": "golf",
+      "name": "Offer A",
+      "kind": "golf_shotgun",
+      "capacity": 100,
+      "groupSize": 4,
+      "wholeGroupsOnly": true,
+      "price": 125,
+      "groupPrice": 500,
+      "groupShare": 0.5,
+      "venueQuote": {
+        "flatFee": 530,
+        "perParticipant": 60,
+        "minimumParticipants": 72,
+        "minimumSpend": 0
+      },
+      "deposit": {
+        "amount": 1000,
+        "creditedTowardBill": true,
+        "refundable": false
+      },
+      "perParticipantCosts": [],
+      "fixedCosts": [],
+      "volunteerHours": 100,
+      "cancellationOwed": 4320,
+      "quoteVerified": true,
+      "costsVerified": true,
+      "upfrontFundingConfirmed": false,
+      "scenarioParticipants": {
+        "conservative": 48,
+        "middle": 72,
+        "optimistic": 100
+      },
+      "contract": {
+        "quoteSource": "Fictional course quote"
+      }
+    },
+    {
+      "id": "second",
+      "name": "Offer B",
+      "kind": "golf_shotgun",
+      "capacity": 100,
+      "groupSize": 4,
+      "wholeGroupsOnly": true,
+      "price": 125,
+      "groupPrice": 500,
+      "groupShare": 0.5,
+      "venueQuote": {
+        "flatFee": 0,
+        "perParticipant": 60,
+        "minimumParticipants": 72,
+        "minimumSpend": 0
+      },
+      "deposit": {
+        "amount": 1000,
+        "creditedTowardBill": true,
+        "refundable": false
+      },
+      "perParticipantCosts": [],
+      "fixedCosts": [
+        {
+          "id": "printing",
+          "label": "Fictional signs and printing",
+          "amount": 500,
+          "paidUpfront": true
+        }
+      ],
+      "volunteerHours": 100,
+      "cancellationOwed": 4320,
+      "quoteVerified": true,
+      "costsVerified": true,
+      "upfrontFundingConfirmed": false,
+      "scenarioParticipants": {
+        "conservative": 48,
+        "middle": 72,
+        "optimistic": 100
+      },
+      "contract": {
+        "quoteSource": "Fictional course quote"
+      }
+    }
+  ],
+  "sponsorships": [],
+  "evidence": {
+    "surveyResponses": 60,
+    "paidRegistrations": {
+      "golf": 32,
+      "second": 32
+    },
+    "paidCashReceived": {
+      "golf": 4000,
+      "second": 4000
+    },
+    "namedHighIntent": {
+      "golf": 40,
+      "second": 40
+    },
+    "surveyDefinitelyAtPrice": {
+      "golf": 0,
+      "second": 0
+    },
+    "surveyProbablyAtPrice": {
+      "golf": 20,
+      "second": 20
+    },
+    "offerTerms": {
+      "golf": {
+        "kind": "golf_shotgun",
+        "price": 12500,
+        "groupSize": 4,
+        "groupPrice": 50000,
+        "format": "Shotgun golf scramble, foursomes (fictional)",
+        "date": "a Saturday in May (fictional)",
+        "place": "[fictional course area]",
+        "included": "golf, cart, lunch, player gift",
+        "supports": "team equipment (fictional)"
+      },
+      "second": {
+        "kind": "golf_shotgun",
+        "price": 12500,
+        "groupSize": 4,
+        "groupPrice": 50000,
+        "format": "Shotgun golf scramble, foursomes (fictional)",
+        "date": "a Saturday in May (fictional)",
+        "place": "[fictional course area]",
+        "included": "golf, cart, lunch, player gift",
+        "supports": "team equipment (fictional)"
+      }
+    }
+  },
+  "criteria": {
+    "minNet": 1000,
+    "maxLoss": 10000
+  }
+}

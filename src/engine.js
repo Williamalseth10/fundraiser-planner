@@ -335,7 +335,13 @@
     const surveyCount = int((ev.namedHighIntent || {})[option.id]) + int((ev.surveyDefinitelyAtPrice || {})[option.id]) + int((ev.surveyProbablyAtPrice || {})[option.id]);
     if (!surveyCount) return { state: 'none', changed: [] };
     const rec = (ev.offerTerms || {})[option.id];
-    if (!rec) return { state: 'unrecorded', changed: [] };
+    // A partial imported snapshot cannot identify the offer. Original snapshots contained these
+    // fields; the beneficiary (supports) was introduced later and remains optional for older plans.
+    const originalFields = ['kind', 'price', 'groupSize', 'groupPrice', 'format', 'date', 'place', 'included'];
+    if (!rec || !originalFields.every((k) => Object.hasOwn(rec, k)) || rec.price == null || rec.price === '' ||
+        !(Number(rec.groupSize) >= 1) || (Number(rec.groupSize) > 1 && (rec.groupPrice == null || rec.groupPrice === ''))) {
+      return { state: 'unrecorded', changed: [] };
+    }
     const now = offerTerms(option, state.snapshot);
     // Terms recorded by an older version may lack newer keys (e.g. "supports"); those keys are not compared.
     const changed = Object.keys(TERM_LABELS).filter((k) => k in rec && String(rec[k] ?? '') !== String(now[k] ?? '')).map((k) => TERM_LABELS[k]);
@@ -351,6 +357,41 @@
     return { ...scenarioContext(state, option, 'conservative'), statuses: ['collected', 'committed'], extraRevenuePerParticipant: 0, otherRevenue: 0 };
   }
 
+  // Preserve historical records with no kind. Once a kind is selected, only an auction
+  // can use these bid estimates. Changing the kind never deletes the organizer's input.
+  function auctionScenarioProceeds(option, scenarioKey) {
+    if (option.kind && option.kind !== 'auction') return null;
+    const amount = (option.scenarioProceeds || {})[scenarioKey];
+    return known(amount) ? d(ci(amount)) : null;
+  }
+
+  /** At each entered turnout, what would bids have to contribute on top of the firm-money case? */
+  function auctionTargets(state, option) {
+    if (option.kind !== 'auction') return [];
+    const ctx = firmContext(state, option);
+    const paid = int(ctx.paidRegistrations);
+    const goal = ci((state.settings || {}).fundraisingTarget);
+    const moneyIssue = optionMoneyIssue(option);
+    return SCENARIO_KEYS.map((key) => {
+      const requested = (option.scenarioParticipants || {})[key];
+      const proceeds = auctionScenarioProceeds(option, key);
+      const row = { key, requested: known(requested) ? Number(requested) : null, proceeds };
+      if (!known(requested)) return { ...row, issue: 'missingTurnout' };
+      if (!known(option.capacity) || maxFeasible(option) === 0) return { ...row, issue: 'capacity' };
+      if (moneyIssue) return { ...row, issue: moneyIssue };
+      const projection = project(option, requested, ctx);
+      row.guests = projection.participants;
+      if (row.guests < paid) return { ...row, issue: 'belowPaid', paid };
+      if (paid > 0 && !known(ctx.paidRegistrationCash)) return { ...row, issue: 'missingReceipts' };
+      if (paid === 0 && ci(ctx.paidRegistrationCash) > 0) return { ...row, issue: 'cashWithoutPaid' };
+      const net = c(projection.net);
+      return {
+        ...row, issue: null, coverCosts: d(Math.max(0, -net)),
+        reachGoal: goal > 0 ? d(Math.max(0, goal - net)) : null,
+      };
+    });
+  }
+
   /** Build the scenario context for an option from app state. */
   function scenarioContext(state, option, scenarioKey) {
     const sc = (state.scenarioSettings || {})[scenarioKey] || {};
@@ -359,7 +400,7 @@
       statuses: sc.statuses || ['collected', 'committed'],
       extraRevenuePerParticipant: sc.extraRevenuePerParticipant || 0,
       // Plan-wide other income plus this option's own entry for the scenario (e.g., the organizer's auction or raffle figure).
-      otherRevenue: (Number(sc.otherRevenue) || 0) + (Number(((option.scenarioProceeds || {})[scenarioKey])) || 0),
+      otherRevenue: (Number(sc.otherRevenue) || 0) + (auctionScenarioProceeds(option, scenarioKey) || 0),
       costContingencyPct: sc.costContingencyPct || 0,
       paidRegistrations: ((state.evidence || {}).paidRegistrations || {})[option.id] || 0,
       paidRegistrationCash: (((state.evidence || {}).paidCashReceived || {})[option.id] ?? null),
@@ -375,7 +416,7 @@
     const target = nonNeg((state.settings || {}).fundraisingTarget);
     const consCtx = scenarioContext(state, option, 'conservative');
     const cons = project(option, (option.scenarioParticipants || {}).conservative, consCtx);
-    const proceedsLow = Number(((option.scenarioProceeds || {}).conservative)) || 0;
+    const proceedsLow = auctionScenarioProceeds(option, 'conservative') || 0;
     // FIRM break-even: ticket/registration money plus collected or committed sponsorship. Nothing assumed:
     // no per-person add-ons, no "other income", no auction or raffle estimates.
     const firmCtx = firmContext(state, option);
@@ -418,7 +459,12 @@
     let status;
     const assumedWords = (u) => u.join(', ').replace(/, ([^,]*)$/, ' and $1');
     // Selling one more costs more than it brings in (e.g. free admission with a per-guest charge).
-    if (!be.reachableWithinCapacity && conditional && conditional.reachableWithinCapacity) {
+    if (depositTermsMissing(option)) {
+      status = 'not_enough_evidence';
+      const issue = 'The quote needs to say whether the deposit counts toward the final bill and whether it is refundable.';
+      reasons.push(issue);
+      missing.push(issue);
+    } else if (!be.reachableWithinCapacity && conditional && conditional.reachableWithinCapacity) {
       status = 'high_risk';
       reasons.push(`Tickets and firm sponsorship can't cover costs even at full capacity (${be.maxFeasible}). It works only if your low-case estimates for ${assumedWords(conditional.uses)} actually arrive${conditional.participants > 0 ? `, with at least ${conditional.participants} paying` : ''}. Those are assumptions, not commitments.`);
     } else if (!be.reachableWithinCapacity) {
@@ -454,6 +500,14 @@
       status = missing.length ? 'supported_with_open_items' : 'supported_by_current_evidence';
       reasons.push(`The break-even headcount (${be.participants}) is at or below paid registrations plus named “yes” answers (${paid + namedCounted}). Named answers are not revenue. Using the conservative turnout you entered, that scenario nets ${usd(cons.net)}. This is not a prediction.`);
       if (missing.length) reasons.push(`${missing.length} item${missing.length > 1 ? 's below still need' : ' below still needs'} checking before anyone signs.`);
+    }
+    if (be.participants === 0 && be.maxFeasible > 0 && paid === 0 && !optionMoneyIssue(option)) {
+      const zeroSales = project(option, 0, firmCtx);
+      if (zeroSales.expenses.total === 0) {
+        reasons.push('Under the terms entered, the costs left to cover at zero sales are $0.00.');
+      } else if (zeroSales.revenue.sponsorshipCash >= zeroSales.expenses.total) {
+        reasons.push(`The ${usd(zeroSales.revenue.sponsorshipCash)} in collected or committed cash sponsorship would cover the ${usd(zeroSales.expenses.total)} in costs at zero sales. Confirm the club could keep that support if the event is small or canceled.`);
+      }
     }
     if (be.reachableWithinCapacity && conditional && conditional.participants !== be.participants) reasons.push(`With your low-case ${assumedWords(conditional.uses)}, break-even would be ${conditional.participants}${conditional.reachableWithinCapacity ? '' : ' (not reachable)'}. That depends on assumptions, so the firm number above is the one to rely on.`);
     // Only when the event can at least break even; otherwise the "loses money even at capacity" reason already says more.
@@ -1011,10 +1065,11 @@
     // 1. Minimum acceptable net proceeds: firm money at the likely number (low number shown beside it, not deciding).
     // The low number is checked on its own (row 92): below the paid count after rounding, its figure is withheld.
     const lowConflict = !lowKnown ? 'lowMissing' : (capacityBelowPaid || low.participants < paidCount) ? 'lowBelowPaid' : null;
-    const lowOk = !!low && !lowConflict;
-    const mBase = { key: 'minNet', value: likely ? likely.net : null, participants: likely ? likely.participants : null, lowValue: lowOk ? low.net : null, lowParticipants: low ? low.participants : null, lowRequested: lowKnown ? Number(sp.conservative) : null, lowConflict, conflict };
+    const depositUnknown = depositTermsMissing(option);
+    const lowOk = !!low && !lowConflict && !depositUnknown;
+    const mBase = { key: 'minNet', value: likely && !depositUnknown ? likely.net : null, participants: likely ? likely.participants : null, lowValue: lowOk ? low.net : null, lowParticipants: low ? low.participants : null, lowRequested: lowKnown ? Number(sp.conservative) : null, lowConflict, conflict };
     if (!known(cr.minNet)) criteria.push({ ...mBase, result: 'unknown', threshold: null });
-    else if (conflict) criteria.push({ ...mBase, result: 'unknown', threshold: d(ci(cr.minNet)) });
+    else if (conflict || depositUnknown) criteria.push({ ...mBase, result: 'unknown', threshold: d(ci(cr.minNet)) });
     else criteria.push({ ...mBase, result: c(likely.net) >= ci(cr.minNet) ? 'met' : 'unmet', threshold: d(ci(cr.minNet)), lowMeets: lowOk ? c(low.net) >= ci(cr.minNet) : null });
 
     // 2. Maximum acceptable loss, against two named exposures: canceling after the deadline (unknown terms stay unknown)
@@ -1027,8 +1082,8 @@
     // empty (the chart keeps only full capacity), so the low-turnout exposure can't be judged.
     const parts = [
       { key: 'cancel', result: judge(cancelLoss), loss: cancelLoss == null ? null : d(cancelLoss) },
-      capacityBelowPaid
-        ? { key: 'lowTurnout', result: 'unknown', loss: null, participants: null, net: null, conflict: 'capacityBelowPaid' }
+      capacityBelowPaid || depositUnknown
+        ? { key: 'lowTurnout', result: 'unknown', loss: null, participants: null, net: null, conflict: capacityBelowPaid ? 'capacityBelowPaid' : 'depositTerms' }
         : { key: 'lowTurnout', result: judge(runLoss), loss: d(runLoss), participants: x.worstOnChart.participants, net: x.worstOnChart.net },
     ];
     const lossResult = limit == null ? 'unknown' : parts.some((q) => q.result === 'unmet') ? 'unmet' : parts.some((q) => q.result === 'unknown') ? 'unknown' : 'met';
@@ -1076,6 +1131,7 @@
     // Next actions, most important first. Never "approve", never "cancel", never a prediction.
     const actions = [];
     const crit = (key) => criteria.find((q) => q.key === key);
+    if (depositUnknown) actions.push('depositTerms');
     if (conflict) actions.push(conflict === 'likelyMissing' ? 'enterLikely' : 'resolveConflict');
     if (crit('minNet').lowConflict === 'lowBelowPaid' && conflict !== 'capacityBelowPaid') actions.push('resolveLow');
     if (!contract.quoteVerified || !contract.cancellationKnown || contract.unresolved.length) actions.push('quote');
@@ -1090,6 +1146,129 @@
     return { criteria, likely: likelyInfo, attendance, cash, contract, missing: dec.missing, actions, status: dec.status, units: unitOf(option) };
   }
 
+  // Compare the estimate recorded before an event with the club's final totals for that event.
+  // Later edits to the option or to its scenarios are deliberately outside this calculation.
+  function clubOutcomeDifference(record, today) {
+    const datesKnown = isCalendarDate(record.estimatedOn) && isCalendarDate(record.eventDate);
+    const hasActual = [record.actualCount, record.actualNet].some((v) => v != null && v !== '');
+    let issue = null;
+    if (hasActual && isCalendarDate(today) && isCalendarDate(record.eventDate) && record.eventDate > today) issue = 'futureEvent';
+    else if (!datesKnown) issue = 'datesMissing';
+    else if (record.estimatedOn > record.eventDate) issue = 'estimateAfterEvent';
+    const difference = (actual, estimate, isMoney) => {
+      if (issue || !Number.isFinite(actual) || !Number.isFinite(estimate)) return null;
+      return isMoney ? d(c(actual) - c(estimate)) : actual - estimate;
+    };
+    return { issue, count: difference(record.actualCount, record.estimatedCount, false),
+      net: difference(record.actualNet, record.estimatedNet, true) };
+  }
+
+  function depositTermsMissing(option) {
+    const deposit = option.deposit || {};
+    return deposit.amount > 0 && (typeof deposit.creditedTowardBill !== 'boolean' || typeof deposit.refundable !== 'boolean');
+  }
+
+  function optionMoneyIssue(option) {
+    if (!knownNum(option.price)) return 'missingPrice';
+    const costLines = [...(option.fixedCosts || []), ...(option.perParticipantCosts || [])];
+    if (costLines.some((line) => !knownNum(line.amount))) return 'missingCost';
+    const quote = option.venueQuote || {};
+    const quoteAmounts = [quote.flatFee, quote.perParticipant, quote.minimumSpend, quote.minimumParticipants, (option.deposit || {}).amount];
+    if (quoteAmounts.some((amount) => !knownNum(amount))) return 'missingQuote';
+    if (depositTermsMissing(option)) return 'depositTerms';
+    return null;
+  }
+
+  // Board overview: show both estimates at the same turnout. Only actual receipts
+  // can support a headline about paid sales. Interest never becomes ticket revenue.
+  function decisionBrief(state, option, calculatedBreakEven) {
+    const firm = firmContext(state, option);
+    const interest = interestFunnel(state, option);
+    const paid = interest.paid;
+    const capacity = maxFeasible(option);
+    const paidCashMissing = paid > 0 && interest.cashReceived == null;
+    let commonIssue = null;
+    if (capacity < paid) commonIssue = 'capacityBelowPaid';
+    else if (!capacity) commonIssue = 'noCapacity';
+    else if (paidCashMissing) commonIssue = 'paidCashMissing';
+    else if (!paid && interest.cashReceived > 0) commonIssue = 'cashWithoutPaid';
+    else commonIssue = optionMoneyIssue(option);
+
+    const cases = {};
+    let likelyAdjustments = null;
+    for (const key of SCENARIO_KEYS) {
+      const raw = (option.scenarioParticipants || {})[key];
+      const entered = knownNum(raw) && !(typeof raw === 'string' && raw.trim() === '');
+      const normalized = entered ? normalizeParticipants(option, raw) : null;
+      const count = normalized ? normalized.participants : null;
+      const firmIssue = commonIssue || (!entered ? 'missing' : count < paid ? 'belowPaid' : null);
+      const missingBid = option.kind === 'auction' && auctionScenarioProceeds(option, key) === null;
+      const issue = firmIssue || (missingBid ? 'missingBid' : null);
+      const scenario = scenarioContext(state, option, key);
+      const projected = issue ? null : project(option, count, scenario);
+      const compared = firmIssue ? null : project(option, count, firm);
+      if (key === 'middle' && projected) {
+        // At the same turnout, ticket sales and venue charges match. These four
+        // components reconcile every cent between the two net figures.
+        likelyAdjustments = {
+          extraIncome: d(c(projected.revenue.extras) + c(projected.revenue.other)),
+          cashSponsorChange: d(c(projected.revenue.sponsorshipCash) - c(compared.revenue.sponsorshipCash)),
+          inKindSavingsChange: d(c(compared.expenses.fixed) - c(projected.expenses.fixed)),
+          comparisonCushion: compared.expenses.contingency, scenarioCushion: projected.expenses.contingency,
+        };
+      }
+      cases[key] = {
+        requested: entered ? Number(raw) : null, participants: count, issue,
+        flags: normalized ? normalized.flags : [],
+        net: projected ? projected.net : null,
+        firmNet: compared ? compared.net : null,
+        salesStillNeeded: count != null && count >= paid && capacity >= paid ? count - paid : null,
+      };
+    }
+
+    // Never round away paid registrations or invent sign-ups to complete a whole group.
+    const paidIssue = commonIssue || (paid % participantStep(option) ? 'partialGroup' : null);
+    const atPaidOnly = { participants: paid, net: paidIssue ? null : project(option, paid, firm).net, issue: paidIssue };
+    const be = commonIssue ? null : calculatedBreakEven || participantsNeeded(option, 0, firm);
+    const reachesBreakEven = !!be && be.reachableWithinCapacity;
+    return {
+      unit: unitOf(option), paid, namedAtCurrentOffer: interest.namedCounted, paidCashMissing,
+      quoteVerified: !!option.quoteVerified, costsVerified: !!option.costsVerified,
+      cases, atPaidOnly, likelyAdjustments,
+      breakEven: {
+        participants: reachesBreakEven ? be.participants : null,
+        additionalPaid: reachesBreakEven ? be.participants - paid : null,
+        dipsAt: reachesBreakEven ? be.dipsAt : null,
+        issue: commonIssue || (reachesBreakEven ? null : 'unreachable'),
+      },
+    };
+  }
+
+  // Compare conditional net dollars, never quantities of unlike units. Only highlight a
+  // middle-case figure when every option meets the same evidence and input checks.
+  function compareClubEstimates(briefs) {
+    const skip = (reason) => ({ reason, leaderIndices: [], firmLeaderNet: null, scenarioLeaderIndices: [], scenarioLeaderNet: null });
+    if (briefs.length < 2) return skip('single');
+    if (briefs.some((b) => SCENARIO_KEYS.some((k) => b.cases[k].issue))) return skip('incomplete');
+    if (briefs.some(({ cases: s }) => s.conservative.requested > s.middle.requested || s.middle.requested > s.optimistic.requested)) return skip('scenarioOrder');
+    if (briefs.some((b) => !b.quoteVerified || !b.costsVerified)) return skip('quoteOrCosts');
+    if (briefs.some((b) => b.cases.middle.participants > b.paid + b.namedAtCurrentOffer)) return skip('turnoutEvidence');
+    function highestAtMiddle(field) {
+      const cents = briefs.map((b) => c(b.cases.middle[field]));
+      const highest = Math.max(...cents);
+      const indices = [];
+      cents.forEach((net, i) => { if (net === highest) indices.push(i); });
+      return { indices, net: d(highest) };
+    }
+    const firm = highestAtMiddle('firmNet');
+    const scenario = highestAtMiddle('net');
+    return {
+      reason: firm.indices.length > 1 ? 'tie' : 'compared',
+      leaderIndices: firm.indices, firmLeaderNet: firm.net,
+      scenarioLeaderIndices: scenario.indices, scenarioLeaderNet: scenario.net,
+    };
+  }
+
   const STATUS_LABELS = {
     not_enough_evidence: 'Not enough evidence to decide yet',
     not_viable_as_configured: 'Not viable as currently configured',
@@ -1099,12 +1278,13 @@
   };
 
   const api = {
-    SPONSOR_STATUSES, STATUS_LABELS,
+    SPONSOR_STATUSES, STATUS_LABELS, clubOutcomeDifference,
     participantStep, maxFeasible, feasibleCounts, normalizeParticipants,
     registrationCents, worstCase, cancellationExposure, roundHeadline,
-    project, participantsNeeded, netCurve, sensitivity, scenarioContext, firmContext, decide, offerTerms, evidenceStatus,
+    project, participantsNeeded, netCurve, sensitivity, scenarioContext, firmContext, auctionTargets, decide, offerTerms, evidenceStatus,
     whatWouldChange, compareOptions, hypotheticalPrice, pricingMargins,
     interestFunnel, capacityShortcuts, compareAtSameTurnout, unitOf, readiness,
+    depositTermsMissing, optionMoneyIssue, decisionBrief, compareClubEstimates,
     audienceSummary, comparableSummary, researchProblems, researchKind, researchVerification, RESEARCH_UNITS, AUDIENCE_CATEGORIES, PROVENANCES, VERIFICATIONS, contractChecklist, isCalendarDate, daysBetween, CONTRACT_DATES, CONTRACT_TEXT,
   };
 

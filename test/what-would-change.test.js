@@ -3,7 +3,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
 const E = require('../src/engine.js');
-const D = require('../src/demo-data.js');
+const D = require('./fixtures/plans.js');
 const clone = (x) => JSON.parse(JSON.stringify(x));
 const control = () => clone(require('./fixtures/golf-control-fictional.json'));
 
